@@ -1,8 +1,8 @@
 import socket
 from threading import Lock, Thread
-from typing import Any, Dict, Tuple
-from typing import Optional
 from time import perf_counter, sleep
+from typing import Any, Dict
+
 from win32api import GetSystemMetrics
 
 Packet = Dict[str, Any]

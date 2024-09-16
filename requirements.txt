@@ -1,0 +1,5 @@
+wxPython==4.2.2
+pynput==1.7.7
+pillow==10.4.0
+pywin32==306
+dxcampil==0.0.5

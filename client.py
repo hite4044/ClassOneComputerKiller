@@ -1,5 +1,7 @@
 import json
 import random
+from typing import Optional
+
 import win32api
 import _ctypes
 import win32con
@@ -191,6 +193,7 @@ class Client:
                 self.connected = False
                 break
 
+    # noinspection PyUnresolvedReferences
     def parse_packet(self, packet: Packet) -> bool:
         """处理数据包，当需要退出时返回False"""
         if packet["type"] == SET_MOUSE_POS:
