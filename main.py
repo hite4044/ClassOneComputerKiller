@@ -190,9 +190,13 @@ class ClientCard(Panel):
         client.screen_tab.screen_panel.screen_shower.set_bitmap = self.set_bitmap
         self.raw_parse_packet = client.parse_packet
         client.parse_packet = self.parse_packet
+        self.raw_send_packet = client.send_packet
+        client.send_packet = self.send_packet
         self.video_update_inv = 2
+        self.last_video_update = 0
         self.data_update_inv = 1
-        self.last_update = 0
+        self.upload_counter = 0
+        self.download_counter = 0
 
         self.cover = wx.StaticBitmap(self, size=(128, 72))
         self.text = wx.StaticText(self, label=DEFAULT_COMPUTER_TEXT)
@@ -234,9 +238,9 @@ class ClientCard(Panel):
 
     def set_bitmap(self, bitmap: wx.Bitmap):
         self.raw_set_bitmap(bitmap)
-        if perf_counter() - self.last_update > self.video_update_inv:
+        if perf_counter() - self.last_video_update > self.video_update_inv:
             wx.CallAfter(self.parse_bitmap, bitmap)
-            self.last_update = perf_counter()
+            self.last_video_update = perf_counter()
 
     def parse_bitmap(self, bitmap: wx.Bitmap):
         image: wx.Image = bitmap.ConvertToImage()
@@ -250,7 +254,12 @@ class ClientCard(Panel):
     def parse_packet(self, packet: Packet, length: int):
         if packet["type"] == HOST_NAME:
             self.text.SetLabel(packet["name"])
+        self.download_counter += length
         return self.raw_parse_packet(packet, length)
+
+    def send_packet(self, packet: Packet, loss_enable: bool = False):
+        self.upload_counter += len(packet)
+        return self.raw_send_packet(packet, loss_enable)
 
     def update_data(self, _):
         if self.client.connected:
@@ -258,6 +267,10 @@ class ClientCard(Panel):
             time = localtime(perf_counter() - self.client.connected_start)
             time_str = f"{str(time.tm_hour - 8).zfill(2)}:{str(time.tm_min).zfill(2)}:{str(time.tm_sec).zfill(2)}"
             self.state_infer.SetLabel(f"Connected: {time_str}")
+            self.network_up.SetLabel(f"↑ {format_size(self.upload_counter / self.data_update_inv)}/s")
+            self.network_down.SetLabel(f"↓ {format_size(self.download_counter / self.data_update_inv)}/s")
+            self.upload_counter = 0
+            self.download_counter = 0
 
 
 class BToolTip:
