@@ -1395,6 +1395,7 @@ class Client(wx.Frame):
 
     def set_screen_send(self, enable: bool):
         self.sending_screen = enable
+        self.screen_tab.screen_panel.screen_controller.control_setter.video_mode_ctl.SetValue(enable)
         packet = {
             "type": SET_SCREEN_SEND,
             "enable": enable
