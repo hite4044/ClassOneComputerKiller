@@ -6,7 +6,7 @@ from time import strftime, localtime
 from PIL import Image
 from io import BytesIO
 from win32api import GetCursorPos
-from os.path import join as path_join, normpath
+from os.path import join as path_join, normpath, abspath
 # noinspection PyProtectedMember
 from wx._core import wxAssertionError
 # noinspection PyUnresolvedReferences
@@ -32,7 +32,7 @@ ExtractIconExA.argtypes = [
 ExtractIconExA.restype = UINT
 
 
-def format_size(size_in_bytes):
+def format_size(size_in_bytes) -> str:
     units = ['B', 'KB', 'MB', 'GB', 'TB']
     index = 0
     while size_in_bytes >= 1024 and index < len(units) - 1:
@@ -41,7 +41,7 @@ def format_size(size_in_bytes):
     return f"{size_in_bytes:.2f} {units[index]}"
 
 
-def ft(size: float, weight: int = 500):
+def ft(size: float, weight: int = 500) -> wx.Font:
     global font_cache
     if font_cache.get((size, weight)):
         return font_cache.get((size, weight))
@@ -69,7 +69,7 @@ def extension_to_bitmap(extension) -> wx.Bitmap:
     return bmp
 
 
-def GetSystemIcon(index: int):
+def GetSystemIcon(index: int) -> wx.Icon:
     shell32dll = ctypes.create_string_buffer("C:\\Windows\\System32\\shell32.dll".encode(), 260)
     small_icon = HICON()
     ExtractIconExA(
@@ -82,6 +82,10 @@ def GetSystemIcon(index: int):
     icon = wx.Icon()
     icon.SetHandle(small_icon.value)
     return icon
+
+
+def load_icon_file(file_path: str) -> wx.Icon:
+    return wx.Icon(name=abspath(file_path))
 
 
 class DataType:
@@ -135,13 +139,13 @@ class Panel(wx.Panel):
 class ClientList(wx.Frame):
     def __init__(self):
         wx.Frame.__init__(self, parent=None, title="客户端列表", size=(670, 555))
-        self.SetBackgroundColour(wx.Colour((255, 255, 255)))
 
         self.clients = {}
         self.run_server()
-        self.SetIcon(GetSystemIcon(334))
+        self.SetIcon(load_icon_file("assets/client_list.ico"))
 
         self.servers_panel = wx.ScrolledWindow(self, size=(450, 500))
+
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.sizer.Add(self.servers_panel, wx.EXPAND)
         self.SetSizer(self.sizer)
@@ -226,7 +230,7 @@ class ClientCard(Panel):
         self.timer.Start(int(self.data_update_inv * 1000))
 
         self.SetSizer(self.main_sizer)
-        self.SetBackgroundColour(wx.Colour((255, 255, 0)))
+        # self.SetBackgroundColour(wx.Colour((255, 255, 0)))
 
     def set_bitmap(self, bitmap: wx.Bitmap):
         self.raw_set_bitmap(bitmap)
@@ -1084,6 +1088,8 @@ class TerminalInput(Panel):
         self.tip_text = "请输入命令"
         self.on_tip = False
         self.has_focus = False
+        self.normal_color = self.GetForegroundColour()
+        self.gray_color = wx.Colour((76, 76, 76))
         self.client = get_client(self)
         self.text.Bind(wx.EVT_SET_FOCUS, self.on_focus)
         self.text.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
@@ -1100,7 +1106,7 @@ class TerminalInput(Panel):
         self.has_focus = True
         if self.on_tip:
             self.text.SetValue("")
-            self.text.SetForegroundColour(wx.Colour((0, 0, 0)))
+            self.text.SetForegroundColour(self.normal_color)
             self.on_tip = False
         event.Skip()
 
@@ -1114,7 +1120,7 @@ class TerminalInput(Panel):
         if not self.has_focus:
             if self.text.GetValue() == "":
                 self.text.SetValue(self.tip_text)
-                self.text.SetForegroundColour(wx.Colour((76, 76, 76)))
+                self.text.SetForegroundColour(self.gray_color)
                 self.on_tip = True
 
     def on_enter(self, event: wx.KeyEvent):
