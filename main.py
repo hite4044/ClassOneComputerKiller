@@ -1,20 +1,18 @@
-from typing import Callable
 import wx
-from base64 import b64decode, b64encode
-from pynput import keyboard
-from time import strftime, localtime
+import ctypes
 from PIL import Image
 from io import BytesIO
+from time import localtime
+from ctypes import wintypes
+from typing import Callable
 from win32api import GetCursorPos
-from os.path import join as path_join, normpath, abspath
-# noinspection PyProtectedMember
 from wx._core import wxAssertionError
-# noinspection PyUnresolvedReferences
-from win32com.shell import shell, shellcon
+from base64 import b64decode, b64encode
+from win32com.shell import shell, shellcon  # type: ignore
 from win32con import FILE_ATTRIBUTE_NORMAL
+from os.path import join as path_join, normpath, abspath
+
 from libs.packets import *
-import ctypes
-from ctypes.wintypes import *
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
 MAX_HISTORY_LENGTH = 100000
@@ -23,17 +21,17 @@ font_cache = {}
 
 ExtractIconExA = ctypes.windll.shell32.ExtractIconExA
 ExtractIconExA.argtypes = [
-    LPCSTR,
+    wintypes.LPCSTR,
     ctypes.c_int,
-    ctypes.POINTER(HICON),
-    ctypes.POINTER(HICON),
-    UINT,
+    ctypes.POINTER(wintypes.HICON),
+    ctypes.POINTER(wintypes.HICON),
+    wintypes.UINT,
 ]
-ExtractIconExA.restype = UINT
+ExtractIconExA.restype = wintypes.UINT
 
 
 def format_size(size_in_bytes) -> str:
-    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    units = ["B", "KB", "MB", "GB", "TB"]
     index = 0
     while size_in_bytes >= 1024 and index < len(units) - 1:
         size_in_bytes /= 1024
@@ -56,10 +54,12 @@ def ft(size: float, weight: int = 500) -> wx.Font:
 def extension_to_bitmap(extension) -> wx.Bitmap:
     """dot is mandatory in extension"""
 
-    flags = shellcon.SHGFI_SMALLICON | shellcon.SHGFI_ICON | shellcon.SHGFI_USEFILEATTRIBUTES
-    retval, info = shell.SHGetFileInfo(extension,
-                                       FILE_ATTRIBUTE_NORMAL,
-                                       flags)
+    flags = (
+        shellcon.SHGFI_SMALLICON
+        | shellcon.SHGFI_ICON
+        | shellcon.SHGFI_USEFILEATTRIBUTES
+    )
+    retval, info = shell.SHGetFileInfo(extension, FILE_ATTRIBUTE_NORMAL, flags)
     assert retval
     hicon, _, _, _, _ = info
     icon: wx.Icon = wx.Icon()
@@ -70,8 +70,10 @@ def extension_to_bitmap(extension) -> wx.Bitmap:
 
 
 def GetSystemIcon(index: int) -> wx.Icon:
-    shell32dll = ctypes.create_string_buffer("C:\\Windows\\System32\\shell32.dll".encode(), 260)
-    small_icon = HICON()
+    shell32dll = ctypes.create_string_buffer(
+        "C:\\Windows\\System32\\shell32.dll".encode(), 260
+    )
+    small_icon = wintypes.HICON()
     ExtractIconExA(
         ctypes.cast(shell32dll, ctypes.c_char_p),
         index,
@@ -80,7 +82,10 @@ def GetSystemIcon(index: int) -> wx.Icon:
         1,
     )
     icon = wx.Icon()
-    icon.SetHandle(small_icon.value)
+    if small_icon.value:
+        icon.SetHandle(small_icon.value)
+    else:
+        icon = wx.NullIcon
     return icon
 
 
@@ -126,9 +131,12 @@ class FilesData:
 
 
 class Panel(wx.Panel):
-    def __init__(self, parent: wx.Window,
-                 pos: tuple[int, int] | list[int] = (0, 0),
-                 size: tuple[int, int] | list[int] = (16, 16)):
+    def __init__(
+        self,
+        parent: wx.Window,
+        pos: tuple[int, int] | list[int] = (0, 0),
+        size: tuple[int, int] | list[int] = (16, 16),
+    ):
         pos = tuple(pos)
         size = tuple(size)
         super().__init__(parent=parent, pos=pos, size=size)
@@ -145,10 +153,20 @@ class ClientList(wx.Frame):
         self.SetIcon(load_icon_file("assets/client_list.ico"))
 
         self.servers_panel = wx.ScrolledWindow(self, size=(450, 500))
+        self.logs_text = wx.StaticText(self, label="日志")
+        self.logs_list = wx.ListBox(self, size=(200, 500))
+
+        self.logs_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.logs_sizer.Add(self.logs_text, wx.EXPAND)
+        self.logs_sizer.Add(self.logs_list, wx.EXPAND)
+        self.logs_sizer.Layout()
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.sizer.Add(self.servers_panel, wx.EXPAND)
+        self.sizer.Add(self.logs_sizer, wx.EXPAND)
+        self.sizer.Layout()
         self.SetSizer(self.sizer)
+        self.logs_text.SetFont(font)
 
         self.Show()
 
@@ -163,10 +181,11 @@ class ClientList(wx.Frame):
         while True:
             conn, addr = sock.accept()
             uuid = conn.recv(8)
-            print("Connect UUID:", hex(int.from_bytes(uuid, "big")))
+            print("客户端UUID:", hex(int.from_bytes(uuid, "big")))
             for addr, client in self.clients.items():
                 assert isinstance(client, Client)
                 if client.uuid == uuid:
+                    print("客户端已存在, 替换连接")
                     client.reconnected(conn, addr, uuid)
                     break
             else:
@@ -183,7 +202,7 @@ class ClientList(wx.Frame):
 class ClientCard(Panel):
     def __init__(self, parent, client):
         assert isinstance(client, Client)
-        super().__init__(parent=parent, size=(500, 180))
+        super().__init__(parent=parent, size=(550, 180))
         self.client = client
 
         self.raw_set_bitmap = client.screen_tab.screen_panel.screen_shower.set_bitmap
@@ -208,6 +227,10 @@ class ClientCard(Panel):
         self.state_infer.SetFont(font)
         self.network_up.SetFont(font)
         self.network_down.SetFont(font)
+        self.cover.Bind(wx.EVT_LEFT_DCLICK, self.on_open)
+        self.state_infer.Bind(wx.EVT_LEFT_DCLICK, self.on_open)
+        self.network_up.Bind(wx.EVT_LEFT_DCLICK, self.on_open)
+        self.network_down.Bind(wx.EVT_LEFT_DCLICK, self.on_open)
 
         self.mid_sizer = wx.BoxSizer(wx.VERTICAL)
         self.mid_sizer.Add(self.text)
@@ -223,18 +246,30 @@ class ClientCard(Panel):
         self.right_sizer.Layout()
 
         self.main_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.main_sizer.Add(self.cover, flag=wx.TOP | wx.BOTTOM | wx.LEFT | wx.ALIGN_LEFT, border=8, proportion=0)
-        self.main_sizer.Add(self.mid_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.LEFT, border=9)
+        self.main_sizer.Add(
+            self.cover,
+            flag=wx.TOP | wx.BOTTOM | wx.LEFT | wx.ALIGN_LEFT,
+            border=8,
+            proportion=0,
+        )
+        self.main_sizer.Add(
+            self.mid_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.LEFT, border=9
+        )
         self.main_sizer.AddSpacer(10)
-        self.main_sizer.Add(self.right_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.RIGHT, border=9)
+        self.main_sizer.Add(
+            self.right_sizer,
+            flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.RIGHT,
+            border=9,
+        )
         self.main_sizer.Fit(self)
 
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.update_data, self.timer)
         self.timer.Start(int(self.data_update_inv * 1000))
+        self.Bind(wx.EVT_LEFT_DCLICK, self.on_open)
+        self.SetWindowStyle(wx.SIMPLE_BORDER)
 
         self.SetSizer(self.main_sizer)
-        # self.SetBackgroundColour(wx.Colour((255, 255, 0)))
 
     def set_bitmap(self, bitmap: wx.Bitmap):
         self.raw_set_bitmap(bitmap)
@@ -266,11 +301,25 @@ class ClientCard(Panel):
             self.text.Refresh()
             time = localtime(perf_counter() - self.client.connected_start)
             time_str = f"{str(time.tm_hour - 8).zfill(2)}:{str(time.tm_min).zfill(2)}:{str(time.tm_sec).zfill(2)}"
-            self.state_infer.SetLabel(f"Connected: {time_str}")
-            self.network_up.SetLabel(f"↑ {format_size(self.upload_counter / self.data_update_inv)}/s")
-            self.network_down.SetLabel(f"↓ {format_size(self.download_counter / self.data_update_inv)}/s")
+            self.state_infer.SetLabel(f"已连接: {time_str}")
+            self.network_up.SetLabel(
+                f"↑ {format_size(self.upload_counter / self.data_update_inv)}/s"
+            )
+            self.network_down.SetLabel(
+                f"↓ {format_size(self.download_counter / self.data_update_inv)}/s"
+            )
             self.upload_counter = 0
             self.download_counter = 0
+        else:
+            self.state_infer.SetLabel("未连接")
+            self.network_up.SetLabel("↑ 0B/s")
+            self.network_down.SetLabel("↓ 0B/s")
+
+    def on_open(self, _):
+        if not self.client.IsShown():
+            self.client.Show(True)
+        self.client.Restore()
+        self.client.SetFocus()
 
 
 class BToolTip:
@@ -358,7 +407,7 @@ class ScreenShower(Panel):
         self.button_map = {
             wx.MOUSE_BTN_LEFT: "left",
             wx.MOUSE_BTN_RIGHT: "right",
-            wx.MOUSE_BTN_MIDDLE: "middle"
+            wx.MOUSE_BTN_MIDDLE: "middle",
         }
 
         self.Bind(wx.EVT_SIZE, self.on_size)
@@ -388,7 +437,7 @@ class ScreenShower(Panel):
                     packet = {
                         "type": SET_SCREEN_SIZE,
                         "data_max_size": 1024 * 1024,
-                        "size": tuple(new_size)
+                        "size": tuple(new_size),
                     }
                     self.client.send_packet(packet)
                     self.last_size = new_size
@@ -407,9 +456,7 @@ class ScreenShower(Panel):
         self.menu = menu
 
     def send_get_screen(self, _):
-        packet = {
-            "type": GET_SCREEN
-        }
+        packet = {"type": GET_SCREEN}
         self.client.send_packet(packet)
 
     def send_video_mode(self, _):
@@ -419,11 +466,7 @@ class ScreenShower(Panel):
         if self.client.mouse_control:
             packet = None
             if event.Moving() and perf_counter() - self.last_move_send > 0.1:
-                packet = {
-                    "type": SET_MOUSE_POS,
-                    "x": event.GetX(),
-                    "y": event.GetY()
-                }
+                packet = {"type": SET_MOUSE_POS, "x": event.GetX(), "y": event.GetY()}
                 self.last_move_send = perf_counter()
             elif event.IsButton():
                 if event.ButtonDown():
@@ -432,7 +475,7 @@ class ScreenShower(Panel):
                         "button": self.button_map[event.GetButton()],
                         "state": 0,
                         "x": event.GetX(),
-                        "y": event.GetY()
+                        "y": event.GetY(),
                     }
                 elif event.ButtonUp():
                     packet = {
@@ -440,7 +483,7 @@ class ScreenShower(Panel):
                         "button": self.button_map[event.GetButton()],
                         "state": 1,
                         "x": event.GetX(),
-                        "y": event.GetY()
+                        "y": event.GetY(),
                     }
 
             if packet:
@@ -456,11 +499,20 @@ class ComputerControlSetter(Panel):
 
         self.text = wx.StaticText(self, label="电脑控制:")
         self.mouse_ctl = wx.CheckBox(self, label="鼠标控制")
-        self.mouse_ctl.Bind(wx.EVT_CHECKBOX, lambda _: self.client.set_mouse_ctl(self.mouse_ctl.GetValue()))
+        self.mouse_ctl.Bind(
+            wx.EVT_CHECKBOX,
+            lambda _: self.client.set_mouse_ctl(self.mouse_ctl.GetValue()),
+        )
         self.keyboard_ctl = wx.CheckBox(self, label="键盘控制")
-        self.keyboard_ctl.Bind(wx.EVT_CHECKBOX, lambda _: self.client.set_keyboard_ctl(self.keyboard_ctl.GetValue()))
+        self.keyboard_ctl.Bind(
+            wx.EVT_CHECKBOX,
+            lambda _: self.client.set_keyboard_ctl(self.keyboard_ctl.GetValue()),
+        )
         self.video_mode_ctl = wx.CheckBox(self, label="视频模式")
-        self.video_mode_ctl.Bind(wx.EVT_CHECKBOX, lambda _: self.client.set_screen_send(self.video_mode_ctl.GetValue()))
+        self.video_mode_ctl.Bind(
+            wx.EVT_CHECKBOX,
+            lambda _: self.client.set_screen_send(self.video_mode_ctl.GetValue()),
+        )
         self.get_screen_btn = wx.Button(self, label="获取屏幕")
         self.get_screen_btn.Bind(wx.EVT_BUTTON, self.send_get_screen)
         self.client = get_client(self)
@@ -480,13 +532,15 @@ class ComputerControlSetter(Panel):
         self.sizer.AddSpacer(20)
         self.sizer.Add(self.video_mode_ctl, flag=wx.ALIGN_LEFT | wx.EXPAND)
         self.sizer.AddSpacer(20)
-        self.sizer.Add(self.get_screen_btn, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP | wx.BOTTOM, border=1)
+        self.sizer.Add(
+            self.get_screen_btn,
+            flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP | wx.BOTTOM,
+            border=1,
+        )
         self.SetSizer(self.sizer)
 
     def send_get_screen(self, _):
-        packet = {
-            "type": GET_SCREEN
-        }
+        packet = {"type": GET_SCREEN}
         self.client.send_packet(packet)
 
 
@@ -514,9 +568,15 @@ class ScreenFormatSetter(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.text = wx.StaticText(self, label="屏幕格式:")
-        self.jpg_button = FormatRadioButton(self, "JPG", ScreenFormat.JPEG, self.set_format)
-        self.png_button = FormatRadioButton(self, "PNG", ScreenFormat.PNG, self.set_format)
-        self.raw_button = FormatRadioButton(self, "Raw", ScreenFormat.RAW, self.set_format)
+        self.jpg_button = FormatRadioButton(
+            self, "JPG", ScreenFormat.JPEG, self.set_format
+        )
+        self.png_button = FormatRadioButton(
+            self, "PNG", ScreenFormat.PNG, self.set_format
+        )
+        self.raw_button = FormatRadioButton(
+            self, "Raw", ScreenFormat.RAW, self.set_format
+        )
         self.pre_scale_box = PreScaleCheckBox(self)
 
         self.sizer.AddSpacer(10)
@@ -558,28 +618,37 @@ class ScreenFormatSetter(Panel):
 
     def _set_format(self, value: str):
         with self.format_lock:
-            packet = {
-                "type": SET_SCREEN_FORMAT,
-                "format": value
-            }
+            packet = {"type": SET_SCREEN_FORMAT, "format": value}
             client: Client = get_client(self)
             if client.connected:
                 client.send_packet(packet)
 
 
 class InputSlider(wx.Panel):
-    def __init__(self, parent: wx.Window,
-                 _from: int = 0, to: int = 100,
-                 _min: int = 0, _max: int = 100,
-                 value: int = 50, cbk: Callable = lambda _: None):
+    def __init__(
+        self,
+        parent: wx.Window,
+        _from: int = 0,
+        to: int = 100,
+        _min: int = 0,
+        _max: int = 100,
+        value: int = 50,
+        cbk: Callable = lambda _: None,
+    ):
         super().__init__(parent=parent, size=(1500, 31))
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.slider = wx.Slider(self, value=value, minValue=_from, maxValue=to, size=(790, 31))
+        self.slider = wx.Slider(
+            self, value=value, minValue=_from, maxValue=to, size=(790, 31)
+        )
         self.inputer = wx.TextCtrl(self, value=str(value), size=(60, 31))
         self.sizer.AddSpacer(5)
-        self.sizer.Add(self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1)
+        self.sizer.Add(
+            self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1
+        )
         self.sizer.AddSpacer(5)
-        self.sizer.Add(self.inputer, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0)
+        self.sizer.Add(
+            self.inputer, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0
+        )
 
         self.slider.Bind(wx.EVT_SLIDER, self.on_slider)
         self.inputer.Bind(wx.EVT_TEXT, self.on_edit)
@@ -605,7 +674,7 @@ class InputSlider(wx.Panel):
         self.slider.SetValue(value)
         self.value = value + 1 - 1
 
-    def on_slider(self, event: wx.EVT_SLIDER):
+    def on_slider(self, event: wx.ScrollEvent):
         value = self.slider.GetValue()
         if value > self.max:
             value = self.max
@@ -614,7 +683,6 @@ class InputSlider(wx.Panel):
             value = self.min
             self.slider.SetValue(value)
         self.inputer.SetValue(str(value))
-        print("滑块值更新:", value)
         self.value = value + 1 - 1
         self.cbk(self.value)
         event.Skip()
@@ -625,7 +693,10 @@ class InputSlider(wx.Panel):
 
     def on_enter(self, event: wx.KeyEvent):
         self.SetFocus()
-        if event.GetKeyCode() == wx.WXK_RETURN or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER:
+        if (
+            event.GetKeyCode() == wx.WXK_RETURN
+            or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER
+        ):
             self.on_focus_out()
         event.Skip()
 
@@ -667,7 +738,9 @@ class ScreenQualitySetter(Panel):
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.StaticText(self, label="屏幕质量:")
-        self.input_slider = InputSlider(self, value=80, _min=1, _max=100, _from=0, to=100)
+        self.input_slider = InputSlider(
+            self, value=80, _min=1, _max=100, _from=0, to=100
+        )
 
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
@@ -690,7 +763,9 @@ class ScreenInformationShower(Panel):
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.FPS_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
         self.sizer.AddSpacer(100)
-        self.sizer.Add(self.network_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
+        self.sizer.Add(
+            self.network_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3
+        )
 
         BToolTip(self.FPS_text, "反映了屏幕传输的流畅度", ft(10))
         BToolTip(self.network_text, "屏幕传输占用的带宽", ft(10))
@@ -717,14 +792,20 @@ class ScreenInformationShower(Panel):
         self.client.screen_counter = 0
         if len(self.fps_avg) > 10:
             self.fps_avg.pop(0)
-        self.FPS_text.SetLabel("FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1)))
+        self.FPS_text.SetLabel(
+            "FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1))
+        )
 
     def update_network(self):
         self.network_avg.append(self.client.screen_network_counter / self.collect_inv)
         self.client.screen_network_counter = 0
         if len(self.network_avg) > 10:
             self.network_avg.pop(0)
-        self.network_text.SetLabel("占用带宽: " + format_size(sum(self.network_avg) / len(self.network_avg)) + " /s")
+        self.network_text.SetLabel(
+            "占用带宽: "
+            + format_size(sum(self.network_avg) / len(self.network_avg))
+            + " /s"
+        )
 
 
 class ScreenController(Panel):
@@ -741,7 +822,10 @@ class ScreenController(Panel):
         self.sizer.Add(wx.StaticLine(self), flag=wx.ALIGN_TOP | wx.EXPAND)
         self.sizer.Add(self.screen_format_setter, flag=wx.ALIGN_TOP | wx.EXPAND)
         self.sizer.Add(self.screen_fps_setter, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(self.screen_quality_setter, flag=wx.ALIGN_TOP | wx.EXPAND | wx.RESERVE_SPACE_EVEN_IF_HIDDEN)
+        self.sizer.Add(
+            self.screen_quality_setter,
+            flag=wx.ALIGN_TOP | wx.EXPAND | wx.RESERVE_SPACE_EVEN_IF_HIDDEN,
+        )
         self.sizer.AddSpacer(3)
         self.sizer.Add(wx.StaticLine(self), flag=wx.ALIGN_TOP | wx.EXPAND)
         self.sizer.Add(self.screen_information_shower, flag=wx.ALIGN_TOP | wx.EXPAND)
@@ -757,7 +841,9 @@ class ScreenPanel(Panel):
 
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.screen_shower, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=1)
-        self.sizer.Add(self.screen_controller, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0)
+        self.sizer.Add(
+            self.screen_controller, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0
+        )
         self.sizer.Layout()
         self.SetSizer(self.sizer)
 
@@ -786,7 +872,7 @@ class KeyMonitorPanel(Panel):
             self.key_monitor.Append(s)
 
     def key_press(self, key: str):
-        if key == keyboard.Key.enter.name:
+        if key == "enter":
             self.add_string("↴")
             self.index += 1
             self.add_string("")
@@ -824,13 +910,18 @@ class ScreenTab(Panel):
 
 class FilesTreeView(wx.TreeCtrl):
     def __init__(self, parent):
-        super().__init__(parent=parent, size=MAX_SIZE, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT)
+        super().__init__(
+            parent=parent, size=MAX_SIZE, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT
+        )
         self.SetFont(font)
 
         self.image_list = wx.ImageList(16, 16, True)
-        self.folder_icon = self.image_list.Add(wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_OTHER, (16, 16)))
+        self.folder_icon = self.image_list.Add(
+            wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_OTHER, (16, 16))
+        )
         self.default_file_icon = self.image_list.Add(
-            wx.ArtProvider.GetBitmap(wx.ART_NORMAL_FILE, wx.ART_OTHER, (16, 16)))
+            wx.ArtProvider.GetBitmap(wx.ART_NORMAL_FILE, wx.ART_OTHER, (16, 16))
+        )
         self.icons = {}
         self.AssignImageList(self.image_list)
         self.Bind(wx.EVT_TREE_ITEM_EXPANDING, self.on_expend)
@@ -871,7 +962,9 @@ class FilesTreeView(wx.TreeCtrl):
             if "." in file_name:
                 extension = file_name.split(".")[-1]
                 if extension not in self.icons:
-                    self.icons[extension] = self.image_list.Add(extension_to_bitmap("." + extension))
+                    self.icons[extension] = self.image_list.Add(
+                        extension_to_bitmap("." + extension)
+                    )
                 icon = self.icons[extension]
             else:
                 icon = self.default_file_icon
@@ -907,10 +1000,7 @@ class FilesTreeView(wx.TreeCtrl):
         self._request_list_dir(self.get_item_path(item))
 
     def _request_list_dir(self, path: str):
-        packet = {
-            "type": REQ_LIST_DIR,
-            "path": path
-        }
+        packet = {"type": REQ_LIST_DIR, "path": path}
         self.load_over_flag = False
         self.client.send_packet(packet)
 
@@ -940,11 +1030,7 @@ class FilesTreeView(wx.TreeCtrl):
 
     def view_file(self, path: str):
         path = normpath(path)
-        packet = {
-            "type": FILE_VIEW,
-            "path": path,
-            "data_max_size": 1024 * 100
-        }
+        packet = {"type": FILE_VIEW, "path": path, "data_max_size": 1024 * 100}
         self.client.send_packet(packet)
 
     def refresh_dir(self, path: str, item_id: wx.TreeItemId):
@@ -953,10 +1039,7 @@ class FilesTreeView(wx.TreeCtrl):
         self._request_list_dir(path)
 
     def delete_path(self, path: str, item_id: wx.TreeItemId):
-        packet = {
-            "type": FILE_DELETE,
-            "path": path
-        }
+        packet = {"type": FILE_DELETE, "path": path}
         self.client.send_packet(packet)
         self.Delete(item_id)
 
@@ -984,7 +1067,17 @@ class FileViewer(wx.Frame):
         self.data = data
 
         self.text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY)
-        encodes = ["utf-8", "gbk", "utf-16", "gb2312", "gb18030", "big5", "shift_jis", "euc_jp", "cp932"]
+        encodes = [
+            "utf-8",
+            "gbk",
+            "utf-16",
+            "gb2312",
+            "gb18030",
+            "big5",
+            "shift_jis",
+            "euc_jp",
+            "cp932",
+        ]
         for encode in encodes:
             try:
                 self.text.AppendText(data.decode(encode))
@@ -1015,10 +1108,13 @@ class FileViewer(wx.Frame):
         except IndexError:
             extension = "*"
         file_name = self.path.split("\\")[-1]
-        with wx.FileDialog(self, "另存为",
-                           wildcard="*." + extension,
-                           defaultFile=file_name,
-                           style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as file_dialog:
+        with wx.FileDialog(
+            self,
+            "另存为",
+            wildcard="*." + extension,
+            defaultFile=file_name,
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as file_dialog:
             if file_dialog.ShowModal() == wx.ID_CANCEL:
                 return
             path = file_dialog.GetPath()
@@ -1048,22 +1144,32 @@ class FileViewer(wx.Frame):
 
 class TerminalText(wx.TextCtrl):
     def __init__(self, parent):
-        wx.TextCtrl.__init__(self, parent=parent, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_CHARWRAP,
-                             size=(1226, 700))
+        wx.TextCtrl.__init__(
+            self,
+            parent=parent,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_CHARWRAP,
+            size=(1226, 700),
+        )
         self.Bind(wx.EVT_CONTEXT_MENU, self.on_menu)
         self.client = get_client(self)
         self.SetForegroundColour(wx.Colour(204, 204, 204))
         self.SetBackgroundColour(wx.Colour(14, 14, 14))
 
-        pixel_font = wx.Font(12, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
-                             wx.FONTWEIGHT_NORMAL, False, "宋体")
+        pixel_font = wx.Font(
+            12,
+            wx.FONTFAMILY_DEFAULT,
+            wx.FONTSTYLE_NORMAL,
+            wx.FONTWEIGHT_NORMAL,
+            False,
+            "宋体",
+        )
         self.SetFont(pixel_font)
 
     def load_packet(self, packet: Packet):
         output: str = packet["output"]
         if chr(12) in output:
             self.Clear()
-            output = output[output.find(chr(12)) + 1:]
+            output = output[output.find(chr(12)) + 1 :]
         if len(self.GetValue()) > MAX_HISTORY_LENGTH:
             self.Remove(0, self.GetLastPosition() - MAX_HISTORY_LENGTH)
         self.AppendText(output)
@@ -1092,7 +1198,9 @@ class TerminalInput(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.TextCtrl(self, size=(1200, 28), style=wx.TE_PROCESS_ENTER)
         self.send_button = wx.Button(self, label="发送", size=(75, 31))
-        self.sizer.Add(self.text, flag=wx.ALIGN_TOP | wx.EXPAND | wx.TOP, border=1, proportion=1)
+        self.sizer.Add(
+            self.text, flag=wx.ALIGN_TOP | wx.EXPAND | wx.TOP, border=1, proportion=1
+        )
         self.sizer.AddSpacer(3)
         self.sizer.Add(self.send_button, flag=wx.ALIGN_TOP, proportion=0)
         self.sizer.AddSpacer(2)
@@ -1137,7 +1245,10 @@ class TerminalInput(Panel):
                 self.on_tip = True
 
     def on_enter(self, event: wx.KeyEvent):
-        if event.GetKeyCode() == wx.WXK_NUMPAD_ENTER or event.GetKeyCode() == wx.WXK_RETURN:
+        if (
+            event.GetKeyCode() == wx.WXK_NUMPAD_ENTER
+            or event.GetKeyCode() == wx.WXK_RETURN
+        ):
             self.send()
         elif event.GetKeyCode() == wx.WXK_UP:
             if self.history_index > 0:
@@ -1188,9 +1299,9 @@ class ActionList(Panel):
         self.top_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.text = wx.StaticText(self, label="操作列表", style=wx.ALIGN_LEFT)
-        self.add_btn = wx.BitmapButton(self,
-                                       bitmap=wx.ArtProvider.GetBitmap(wx.ART_ADD_BOOKMARK),
-                                       size=(24, 24))
+        self.add_btn = wx.BitmapButton(
+            self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_ADD_BOOKMARK), size=(24, 24)
+        )
         self.action_listbox = wx.ListBox(self, style=wx.LB_SINGLE)
         self.text.SetFont(font)
         self.action_listbox.SetFont(font)
@@ -1217,8 +1328,16 @@ class ActionTab(Panel):
 
 
 class Client(wx.Frame):
-    def __init__(self, parent: wx.Frame, sock: socket.socket, address: tuple[str, int], uuid: bytes):
-        wx.Frame.__init__(self, parent=parent, title=DEFAULT_COMPUTER_TEXT, size=(1250, 772))
+    def __init__(
+        self,
+        parent: wx.Frame,
+        sock: socket.socket,
+        address: tuple[str, int],
+        uuid: bytes,
+    ):
+        wx.Frame.__init__(
+            self, parent=parent, title=DEFAULT_COMPUTER_TEXT, size=(1250, 772)
+        )
 
         self.sock = sock
         self.address = address
@@ -1261,6 +1380,7 @@ class Client(wx.Frame):
         self.tab.SetFont(font)
 
         self.SetIcon(GetSystemIcon(15))
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         self.client_card = ClientCard(self.GetParent().servers_panel, self)
 
     def reconnected(self, conn: socket.socket, addr: tuple[str, int], uuid: bytes):
@@ -1317,10 +1437,13 @@ class Client(wx.Frame):
             path, data = self.files_list[packet["cookie"]]
             wx.CallAfter(FileViewer, self, path, data)
         elif packet["type"] == FILE_VIEW_ERROR:
-            wx.CallAfter(wx.MessageBox,
-                         f"无法打开文件: {packet['path']}\n{packet['error']}",
-                         "文件查看错误",
-                         wx.OK | wx.ICON_ERROR, parent=self)
+            wx.CallAfter(
+                wx.MessageBox,
+                f"无法打开文件: {packet['path']}\n{packet['error']}",
+                "文件查看错误",
+                wx.OK | wx.ICON_ERROR,
+                parent=self,
+            )
 
         elif packet["type"] == SHELL_OUTPUT:
             self.terminal_panel.text.load_packet(packet)
@@ -1329,9 +1452,14 @@ class Client(wx.Frame):
         return True
 
     def shell_broke_tip(self):
-        ret = wx.MessageBox("终端已损坏\n立即重启终端?", "终端错误", wx.YES_NO | wx.ICON_ERROR, parent=self)
-        if ret == wx.ID_YES:
-            self.restore_shell()
+        ret = wx.MessageBox(
+            "终端已损坏\n立即重启终端?",
+            "终端错误",
+            wx.YES_NO | wx.ICON_ERROR,
+            parent=self,
+        )
+        if ret == 2:
+            self.terminal_panel.text.restore_shell(None)
 
     def parse_screen(self, packet: Packet, length: int):
         data = b64decode(packet["data"])
@@ -1363,41 +1491,27 @@ class Client(wx.Frame):
 
     def set_pre_scale(self, enable: bool):
         self.pre_scale = enable
-        packet = {
-            "type": SET_PRE_SCALE,
-            "enable": enable
-        }
+        packet = {"type": SET_PRE_SCALE, "enable": enable}
         self.send_packet(packet)
         self.screen_tab.screen_panel.screen_shower.on_size()
 
     def set_screen_fps(self, fps: int):
-        packet = {
-            "type": SET_SCREEN_FPS,
-            "fps": fps
-        }
+        packet = {"type": SET_SCREEN_FPS, "fps": fps}
         self.send_packet(packet)
 
     def set_screen_quality(self, quality: int):
-        packet = {
-            "type": SET_SCREEN_QUALITY,
-            "quality": quality
-        }
+        packet = {"type": SET_SCREEN_QUALITY, "quality": quality}
         self.send_packet(packet)
 
     def send_command(self, command: str):
         self.shell_send_data((command + "\r\n").encode("gbk"))
 
     def shell_send_data(self, data: bytes):
-        packet = {
-            "type": SHELL_INPUT,
-            "text": b64encode(data)
-        }
+        packet = {"type": SHELL_INPUT, "text": b64encode(data)}
         self.send_packet(packet)
 
     def restore_shell(self):
-        packet = {
-            "type": SHELL_INIT
-        }
+        packet = {"type": SHELL_INIT}
         self.send_packet(packet)
 
     def set_mouse_ctl(self, enable: bool):
@@ -1408,15 +1522,15 @@ class Client(wx.Frame):
 
     def set_screen_send(self, enable: bool):
         self.sending_screen = enable
-        self.screen_tab.screen_panel.screen_controller.control_setter.video_mode_ctl.SetValue(enable)
-        packet = {
-            "type": SET_SCREEN_SEND,
-            "enable": enable
-        }
+        self.screen_tab.screen_panel.screen_controller.control_setter.video_mode_ctl.SetValue(
+            enable
+        )
+        packet = {"type": SET_SCREEN_SEND, "enable": enable}
         self.send_packet(packet)
 
-    def on_close(self):
-        pass
+    def on_close(self, _: wx.CloseEvent):
+        self.Show(False)
+        return False
 
     # 网络底层接口
     def packet_send_thread(self):
@@ -1424,7 +1538,7 @@ class Client(wx.Frame):
         print("Send Thread Exited")
 
     def send_packet(self, packet: Packet, loss_enable: bool = False) -> None:
-        print(f"发送数据包: {packet['type']}")
+        print(f"发送数据包: {packet}")
         self.packet_manager.send_packet(packet, loss_enable)
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
@@ -1452,7 +1566,7 @@ def get_client(widget: wx.Window) -> Client:
             return widget
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = wx.App()
     font: wx.Font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
     font.SetPointSize(11)

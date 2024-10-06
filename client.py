@@ -68,6 +68,7 @@ class Client:
         # 屏幕传输相关
         self.sending_screen = False  # 是否发送屏幕
         self.screen_fps = 15  # 发送屏幕帧率
+        self.shell_stop_flag = False  # 是否停止shell
         self.screen_format: str = ScreenFormat.JPEG  # 屏幕传输格式
         self.screen_quality = 80  # 使用JPEG格式时的传输质量
         self.pre_scaled = True  # 是否预缩放
@@ -108,7 +109,7 @@ class Client:
         self.connect_until()
         self.log("成功连接至服务器!")
         self.sock.sendall(int(self.uuid, 16).to_bytes(8, "big"))
-        start_and_return(self.shell_output_thread)
+        self.shell_thread = start_and_return(self.shell_output_thread)
         self.threads.append(start_and_return(self.log_send_thread))
         self.threads.append(start_and_return(self.packet_send_thread))
         self.threads.append(start_and_return(self.connection_init))
@@ -121,7 +122,7 @@ class Client:
                 self.connected = False
                 break
             if packet is None:
-                print("没有接收到数据包")
+                print("\r没有接收到数据包", end="")
                 sleep(0.001)
                 continue
             print("接收到数据包:", packet["type"])
@@ -294,10 +295,9 @@ class Client:
 
     def shell_output_thread(self):
         self.shell_thread_running = True
-        sleep(2)
-        print("Thread Start")
+        print("终端输出线程启动")
         try:
-            while self.connected:
+            while self.connected and (not self.shell_stop_flag):
                 try:
                     output = self.get_output()
                     if output:
@@ -313,7 +313,7 @@ class Client:
                     break
         except Exception as e:
             print(e)
-        print("Thread Exit")
+        print("终端输出线程停止")
         self.shell_thread_running = False
 
     def get_output(self) -> str:
@@ -391,6 +391,7 @@ class Client:
     def init_var(self):
         self.sending_screen = False  # 是否发送屏幕
         self.screen_fps = 15  # 发送屏幕帧率
+        self.shell_stop_flag = False  # 是否停止shell
         self.screen_format: str = ScreenFormat.JPEG  # 屏幕传输格式
         self.screen_quality = 80  # 使用JPEG格式时的传输质量
         self.pre_scaled = True  # 是否预缩放
@@ -404,9 +405,12 @@ class Client:
     def restore_shell(self):
         if getattr(self, "shell", None):
             self.shell.terminate()
+            self.shell_stop_flag = True
+            self.shell_thread.join()
+            self.shell_stop_flag = False
         self.shell = Popen(["cmd"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, shell=True, universal_newlines=False)
         if not self.shell_thread_running:
-            start_and_return(self.shell_output_thread)
+            self.shell_thread = start_and_return(self.shell_output_thread)
 
     def try_connect(self) -> bool:
         try:
