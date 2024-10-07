@@ -1,5 +1,6 @@
 import wx
 import ctypes
+import wx.grid
 from PIL import Image
 from io import BytesIO
 from time import localtime
@@ -1285,32 +1286,87 @@ class TerminalTab(Panel):
 
 
 class NetworkTab(Panel):
-    pass
+    def __init__(self, parent):
+        super().__init__(parent=parent, size=(1210, 668))
+        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.text = wx.StaticText(self, label="byd不想做, 感觉没用")
+        self.sizer.Add(self.text)
+        self.SetSizer(self.sizer)
+
+        self.text.SetFont(ft(90))
+
+
+class ActionGrid(wx.grid.Grid):
+    def __init__(self, parent: wx.Window):
+        super().__init__(parent, size=MAX_SIZE)
+        self.CreateGrid(1, 4)
+        gui_data = [
+            ("名称", 100),
+            ("触发条件", 300),
+            ("执行操作", 180),
+            ("停止条件", 300),
+        ]
+
+        for i in range(len(gui_data)):
+            name, width = gui_data[i]
+            self.SetColLabelValue(i, name)
+            self.SetColSize(i, width)
+        self.SetCellValue(0, 0, "默认")
+
+        self.SetRowLabelSize(1)
+        self.EnableEditing(False)
+        self.SetLabelFont(font)
+        self.SetDefaultCellFont(font)
 
 
 class ActionEditor(Panel):
-    pass
+    def __init__(self, parent: wx.Window):
+        super().__init__(parent, size=MAX_SIZE)
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.action_grid = ActionGrid(self)
+
+        self.control_bar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.action_add_btn = wx.Button(self, label="添加操作")
+        self.action_add_btn.SetFont(font)
+        self.control_bar_sizer.Add(self.action_add_btn)
+
+        self.sizer.Add(self.control_bar_sizer, flag=wx.EXPAND | wx.ALL, border=6)
+        self.sizer.Add(self.action_grid, flag=wx.EXPAND | wx.ALL, border=6)
+        self.SetSizer(self.sizer)
 
 
 class ActionList(Panel):
     def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 668))
+        super().__init__(parent=parent, size=(250, 703))
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.top_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.text = wx.StaticText(self, label="操作列表", style=wx.ALIGN_LEFT)
-        self.add_btn = wx.BitmapButton(
-            self, bitmap=wx.ArtProvider.GetBitmap(wx.ART_ADD_BOOKMARK), size=(24, 24)
-        )
+        bmp = wx.Bitmap()
+        bmp.LoadFile(abspath(r"assets\add.png"), wx.BITMAP_TYPE_PNG)
+        self.add_btn = wx.BitmapButton(self, bitmap=bmp)
         self.action_listbox = wx.ListBox(self, style=wx.LB_SINGLE)
-        self.text.SetFont(font)
+        self.text.SetFont(ft(13))
         self.action_listbox.SetFont(font)
 
-        self.top_sizer.Add(self.text, flag=wx.EXPAND, proportion=1)
-        self.top_sizer.Add(self.add_btn, proportion=0)
-        self.sizer.Add(self.top_sizer, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0)
-        self.sizer.Add(self.action_listbox, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=1)
+        self.top_sizer.Add(
+            self.text, flag=wx.EXPAND | wx.TOP | wx.LEFT, proportion=1, border=4
+        )
+        self.top_sizer.Add(self.add_btn, flag=wx.TOP | wx.RIGHT, proportion=0, border=4)
+        self.sizer.Add(
+            self.top_sizer,
+            flag=wx.ALIGN_TOP | wx.EXPAND | wx.LEFT | wx.RIGHT,
+            proportion=0,
+            border=3,
+        )
+        self.sizer.Add(
+            self.action_listbox,
+            flag=wx.ALIGN_TOP | wx.EXPAND | wx.ALL,
+            proportion=1,
+            border=5,
+        )
         self.SetSizer(self.sizer)
+        self.SetWindowStyle(wx.SIMPLE_BORDER)
 
         for action in Actions.action_list:
             self.action_listbox.Append(action.label)
@@ -1322,8 +1378,10 @@ class ActionTab(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.action_editor = ActionEditor(self)
         self.action_list = ActionList(self)
-        self.sizer.Add(self.action_editor, flag=wx.EXPAND)
-        self.sizer.Add(self.action_list, flag=wx.EXPAND)
+        self.sizer.Add(self.action_editor, flag=wx.EXPAND, proportion=1)
+        self.sizer.Add(
+            self.action_list, flag=wx.EXPAND | wx.ALL, proportion=0, border=5
+        )
         self.SetSizer(self.sizer)
 
 
