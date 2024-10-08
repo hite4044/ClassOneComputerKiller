@@ -391,6 +391,8 @@ class BToolTip:
                     self.tooltip.Destroy()
                 except AttributeError:
                     pass
+                except RuntimeError:
+                    pass
             self.tooltip = None
         event.Skip()
 
@@ -641,20 +643,20 @@ class InputSlider(wx.Panel):
         self.slider = wx.Slider(
             self, value=value, minValue=_from, maxValue=to, size=(790, 31)
         )
-        self.inputer = wx.TextCtrl(self, value=str(value), size=(60, 31))
+        self.inputter = wx.TextCtrl(self, value=str(value), size=(60, 31))
         self.sizer.AddSpacer(5)
         self.sizer.Add(
             self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1
         )
         self.sizer.AddSpacer(5)
         self.sizer.Add(
-            self.inputer, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0
+            self.inputter, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0
         )
 
         self.slider.Bind(wx.EVT_SLIDER, self.on_slider)
-        self.inputer.Bind(wx.EVT_TEXT, self.on_edit)
-        self.inputer.Bind(wx.EVT_CHAR_HOOK, self.on_enter)
-        self.inputer.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
+        self.inputter.Bind(wx.EVT_TEXT, self.on_edit)
+        self.inputter.Bind(wx.EVT_CHAR_HOOK, self.on_enter)
+        self.inputter.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
 
         self.value = value
         self.min = _min
@@ -663,7 +665,7 @@ class InputSlider(wx.Panel):
         self.SetSizer(self.sizer)
 
     def parse_value(self):
-        value = self.inputer.GetValue()
+        value = self.inputter.GetValue()
         try:
             value = int(value)
         except ValueError:
@@ -683,7 +685,7 @@ class InputSlider(wx.Panel):
         elif value < self.min:
             value = self.min
             self.slider.SetValue(value)
-        self.inputer.SetValue(str(value))
+        self.inputter.SetValue(str(value))
         self.value = value + 1 - 1
         self.cbk(self.value)
         event.Skip()
@@ -703,7 +705,7 @@ class InputSlider(wx.Panel):
 
     def on_focus_out(self, event: wx.Event = None):
         self.parse_value()
-        self.inputer.SetValue(str(self.value))
+        self.inputter.SetValue(str(self.value))
         self.cbk(self.value)
         if event:
             event.Skip()
@@ -1319,6 +1321,142 @@ class ActionGrid(wx.grid.Grid):
         self.SetDefaultCellFont(font)
 
 
+class LabelEntry(Panel):
+    def __init__(self, parent, label: str):
+        super().__init__(parent, size=(130, 27))
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.label_ctl = wx.StaticText(self, label=label)
+        self.text = wx.TextCtrl(self, size=(100, 27))
+        self.label_ctl.SetFont(font)
+        sizer.Add(self.label_ctl, flag=wx.ALIGN_CENTER_VERTICAL, proportion=0)
+        sizer.AddSpacer(6)
+        sizer.Add(self.text, wx.EXPAND)
+        self.SetSizer(sizer)
+        
+
+class LabelCombobox(Panel):
+    def __init__(self, parent, label: str, choices: list = []):
+        super().__init__(parent, size=(130, 27))
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.label_ctl = wx.StaticText(self, label=label)
+        self.combobox = wx.ComboBox(self, choices=choices, size=(100, 27))
+        self.label_ctl.SetFont(font)
+        sizer.Add(self.label_ctl, flag=wx.ALIGN_CENTER_VERTICAL, proportion=0)
+        sizer.AddSpacer(6)
+        sizer.Add(self.combobox, wx.EXPAND)
+        self.SetSizer(sizer)
+
+
+class AddableList(Panel):
+    def __init__(self, parent, label: str):
+        super().__init__(parent, size=(200, 200))
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        top_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.add_button = wx.BitmapButton(
+            self, bitmap=wx.Bitmap(abspath("assets/add.png"), wx.BITMAP_TYPE_PNG)
+        )
+        self.add_button.Bind(wx.EVT_BUTTON, self.on_add)
+        self.label_ctl = wx.StaticText(self, label=label)
+        self.label_ctl.SetFont(ft(13))
+        self.listbox = wx.ListBox(self, size=(200, 85))
+        self.listbox.SetFont(font)
+
+        top_sizer.Add(self.label_ctl, wx.EXPAND | wx.TOP, border=5)
+        top_sizer.Add(self.add_button, proportion=0)
+        sizer.Add(top_sizer, flag=wx.ALL | wx.EXPAND, border=3)
+        sizer.Add(self.listbox, wx.EXPAND)
+        self.SetSizer(sizer)
+        self.listbox.Bind(wx.EVT_MENU, self.on_empty_menu)
+        self.listbox.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_item_menu)
+
+    def on_empty_menu(self, event):
+        menu = wx.Menu()
+        menu.Append(wx.MenuItem(menu, 1, "添加"))
+        menu.Bind(wx.EVT_MENU, self.on_add, id=1)
+        self.PopupMenu(menu)
+
+    def on_item_menu(self, event: wx.ListEvent):
+        menu = wx.Menu()
+        menu.Append(wx.MenuItem(menu, 1, "添加"))
+        menu.Append(wx.MenuItem(menu, 2, "修改"))
+        menu.Append(wx.MenuItem(menu, 3, "删除"))
+        index = event.GetIndex()
+        menu.Bind(wx.EVT_MENU, lambda _: self.on_add(index), id=1)
+        menu.Bind(wx.EVT_MENU, lambda _: self.on_modify(index), id=2)
+        menu.Bind(wx.EVT_MENU, lambda _: self.on_delete(index), id=3)
+
+    def on_add(self, index: int):
+        pass
+
+    def on_modify(self, index: int):
+        pass
+
+    def on_delete(self, index: int):
+        self.listbox.Delete(index)
+
+
+class StartPrqList(AddableList):
+    def __init__(self, parent):
+        super().__init__(parent, "开始条件")
+
+    def on_add(self, index: int):
+        pass
+
+
+class EndPrqList(AddableList):
+    def __init__(self, parent):
+        super().__init__(parent, "结束条件")
+
+    def on_add(self, index: int):
+        pass
+
+
+class ActionAddDialog(wx.Frame):
+    def __init__(self, parent):
+        assert isinstance(parent, ActionEditor)
+        super().__init__(get_client(parent), title="动作编辑器", size=(420, 390))
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.name_inputter = LabelEntry(self, "名称: ")
+        self.prq_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.start_prqs = StartPrqList(self)
+        self.end_prqs = EndPrqList(self)
+        self.actions_chooser = LabelCombobox(self, "动作: ", ["动作1", "动作2"])
+        self.bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.ok_btn = wx.Button(self, label="确定")
+        self.cancel_btn = wx.Button(self, label="取消")
+        
+        for i in range(10):
+            self.start_prqs.listbox.Append(f"Test:{i}")
+        self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
+        self.cancel_btn.Bind(wx.EVT_BUTTON, self.on_cancel)
+        self.ok_btn.SetFont(ft(12))
+        self.cancel_btn.SetFont(ft(12))
+        self.name_inputter.label_ctl.SetFont(ft(13))
+        self.actions_chooser.label_ctl.SetFont(ft(13))
+        
+        self.sizer.Add(self.name_inputter, proportion=0)
+        self.sizer.AddSpacer(6)
+        self.prq_sizer.Add(self.start_prqs, flag=wx.EXPAND, proportion=50)
+        self.prq_sizer.AddSpacer(6)
+        self.prq_sizer.Add(self.end_prqs, flag=wx.EXPAND, proportion=50)
+        self.sizer.Add(self.prq_sizer, wx.EXPAND)
+        self.sizer.AddSpacer(6)
+        self.sizer.Add(self.actions_chooser, proportion=0)
+        self.bottom_sizer.Add(self.ok_btn, proportion=0)
+        self.bottom_sizer.AddSpacer(6)
+        self.bottom_sizer.Add(self.cancel_btn, proportion=0)
+        self.sizer.Add(self.bottom_sizer, flag=wx.ALIGN_RIGHT | wx.ALL, border=6)
+        self.SetSizer(self.sizer)
+        self.SetIcon(wx.Icon(abspath(r"assets\action_editor.ico")))
+        self.Show()
+    
+    def on_ok(self, _):
+        self.Close()
+
+    def on_cancel(self, _):
+        self.Close()
+        
+
 class ActionEditor(Panel):
     def __init__(self, parent: wx.Window):
         super().__init__(parent, size=MAX_SIZE)
@@ -1327,12 +1465,25 @@ class ActionEditor(Panel):
 
         self.control_bar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.action_add_btn = wx.Button(self, label="添加操作")
+        self.action_remove_btn = wx.Button(self, label="删除操作")
+        self.action_add_btn.Bind(wx.EVT_BUTTON, self.on_add_action)
         self.action_add_btn.SetFont(font)
+        self.action_remove_btn.SetFont(font)
+        self.action_grid.SetWindowStyle(wx.SIMPLE_BORDER)
         self.control_bar_sizer.Add(self.action_add_btn)
+        self.control_bar_sizer.AddSpacer(6)
+        self.control_bar_sizer.Add(self.action_remove_btn)
 
-        self.sizer.Add(self.control_bar_sizer, flag=wx.EXPAND | wx.ALL, border=6)
+        self.sizer.Add(
+            self.control_bar_sizer,
+            flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT,
+            border=6,
+        )
         self.sizer.Add(self.action_grid, flag=wx.EXPAND | wx.ALL, border=6)
         self.SetSizer(self.sizer)
+
+    def on_add_action(self, _):
+        ActionAddDialog(self)
 
 
 class ActionList(Panel):
@@ -1421,6 +1572,10 @@ class Client(wx.Frame):
 
     # noinspection PyAttributeOutsideInit
     def init_ui(self):
+        bmp = wx.Bitmap()
+        bmp.LoadFile(r"D:\Desktop\bg.png")
+        # self.background = wx.StaticBitmap(self, pos=(0, 0), size=self.GetSize(), bitmap=bmp)
+
         self.tab = wx.Notebook(self)
 
         self.screen_tab = ScreenTab(self.tab)
