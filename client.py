@@ -226,7 +226,14 @@ class Client:
         elif packet["type"] == SET_SCREEN_SEND:
             self.sending_screen = packet["enable"]
         elif packet["type"] == GET_SCREEN:
+            restore = False
+            if not self.pre_scaled:
+                restore = True
+                self.pre_scaled = True
+                self.screen_size = packet["size"]
             screen_packet = self.get_screen_packet()
+            if restore:
+                self.pre_scaled = False
             if screen_packet is not None:
                 self.send_packet(screen_packet)
 

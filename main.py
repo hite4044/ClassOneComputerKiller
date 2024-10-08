@@ -431,7 +431,7 @@ class ScreenShower(Panel):
             event.Skip()
 
     def on_size(self, event: wx.Event = None):
-        if self.client.pre_scale:
+        if self.client.pre_scale and self.client.sending_screen:
             if perf_counter() - self.last_size_send > 0.1:
                 new_size = self.GetSize()
                 if 0 in new_size:
@@ -543,7 +543,7 @@ class ComputerControlSetter(Panel):
         self.SetSizer(self.sizer)
 
     def send_get_screen(self, _):
-        packet = {"type": GET_SCREEN}
+        packet = {"type": GET_SCREEN, "size": tuple(self.GetSize())}
         self.client.send_packet(packet)
 
 
