@@ -14,6 +14,7 @@ from win32con import FILE_ATTRIBUTE_NORMAL
 from os.path import join as path_join, normpath, abspath
 
 from libs.packets import *
+from libs.action import *
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
 MAX_HISTORY_LENGTH = 100000
@@ -145,7 +146,18 @@ class Panel(wx.Panel):
         # self.SetBackgroundColour(wx.Colour(*(random.randint(0, 255) for _ in range(3))))
 
 
-class ClientList(wx.Frame):
+class ClientsContainer(wx.ScrolledWindow):
+    def __init__(self, parent: wx.Window):
+        super().__init__(parent=parent, size=(450, 500))
+        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.SetSizer(self.sizer)
+
+    def add_card(self, client_card):
+        assert isinstance(client_card, ClientCard)
+        self.sizer.Add(client_card, wx.EXPAND)
+
+
+class ClientListWindow(wx.Frame):
     def __init__(self):
         wx.Frame.__init__(self, parent=None, title="客户端列表", size=(670, 555))
 
@@ -153,7 +165,7 @@ class ClientList(wx.Frame):
         self.run_server()
         self.SetIcon(load_icon_file("assets/client_list.ico"))
 
-        self.servers_panel = wx.ScrolledWindow(self, size=(450, 500))
+        self.servers_container = ClientsContainer(self)
         self.logs_text = wx.StaticText(self, label="日志")
         self.logs_list = wx.ListBox(self, size=(200, 500))
 
@@ -163,13 +175,19 @@ class ClientList(wx.Frame):
         self.logs_sizer.Layout()
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.sizer.Add(self.servers_panel, wx.EXPAND)
+        self.sizer.Add(self.servers_container, wx.EXPAND)
         self.sizer.Add(self.logs_sizer, wx.EXPAND)
         self.sizer.Layout()
         self.SetSizer(self.sizer)
         self.logs_text.SetFont(font)
 
         self.Show()
+
+    def add_card(self, client):
+        assert isinstance(client, Client)
+        card = ClientCard(self.servers_container, client)
+        self.servers_container.add_card(card)
+        return card
 
     def run_server(self):
         Thread(target=self.server_thread, daemon=True).start()
@@ -1047,8 +1065,17 @@ class FilesTreeView(wx.TreeCtrl):
         self.Delete(item_id)
 
 
+class FileTransport(wx.ScrolledWindow):
+    def __init__(self, parent):
+        super().__init__(parent=parent, size=(400, 668))
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+
+
 class FileTransport(Panel):
-    pass
+    def __init__(self, parent):
+        super().__init__(parent=parent, size=(400, 668))
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.main_bar = wx.Gauge(self, range=100)
 
 
 class FilesTab(Panel):
@@ -1313,12 +1340,29 @@ class ActionGrid(wx.grid.Grid):
             name, width = gui_data[i]
             self.SetColLabelValue(i, name)
             self.SetColSize(i, width)
-        self.SetCellValue(0, 0, "默认")
+        self.datas = []
+        self.SetDefaultCellAlignment(wx.ALIGN_CENTER, wx.ALIGN_CENTER)
+        self.Set
 
         self.SetRowLabelSize(1)
         self.EnableEditing(False)
         self.SetLabelFont(font)
         self.SetDefaultCellFont(font)
+
+    def add_action(
+        self,
+        name: str,
+        start_prqs: list[StartPrq],
+        end_prqs: list[EndPrq],
+        actions: list[AnAction],
+    ):
+        self.AppendRows(1)
+        row = self.GetNumberRows() - 1
+        self.SetCellValue(row, 0, name)
+        self.SetCellValue(row, 1, " ".join([start.name() for start in start_prqs]))
+        self.SetCellValue(row, 2, " ".join([action.name() for action in actions]))
+        self.SetCellValue(row, 3, " ".join([end.name() for end in end_prqs]))
+        self.datas.append(TheAction(name, actions, start_prqs, end_prqs))
 
 
 class LabelEntry(Panel):
@@ -1332,19 +1376,30 @@ class LabelEntry(Panel):
         sizer.AddSpacer(6)
         sizer.Add(self.text, wx.EXPAND)
         self.SetSizer(sizer)
-        
+
 
 class LabelCombobox(Panel):
-    def __init__(self, parent, label: str, choices: list = []):
+    def __init__(self, parent, label: str, choices: list[tuple[str, str]] = []):
         super().__init__(parent, size=(130, 27))
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.label_ctl = wx.StaticText(self, label=label)
-        self.combobox = wx.ComboBox(self, choices=choices, size=(100, 27))
+        self.combobox = wx.ComboBox(
+            self, choices=[name for name, _ in choices], size=(100, 27)
+        )
         self.label_ctl.SetFont(font)
         sizer.Add(self.label_ctl, flag=wx.ALIGN_CENTER_VERTICAL, proportion=0)
         sizer.AddSpacer(6)
         sizer.Add(self.combobox, wx.EXPAND)
         self.SetSizer(sizer)
+
+        self.datas = choices
+
+    def get_data(self) -> str | None:
+        select = self.combobox.GetValue()
+        for name, data in self.datas:
+            if name == select:
+                return data
+        return None
 
 
 class AddableList(Panel):
@@ -1355,7 +1410,7 @@ class AddableList(Panel):
         self.add_button = wx.BitmapButton(
             self, bitmap=wx.Bitmap(abspath("assets/add.png"), wx.BITMAP_TYPE_PNG)
         )
-        self.add_button.Bind(wx.EVT_BUTTON, self.on_add)
+        self.add_button.Bind(wx.EVT_BUTTON, lambda _: self.on_add())
         self.label_ctl = wx.StaticText(self, label=label)
         self.label_ctl.SetFont(ft(13))
         self.listbox = wx.ListBox(self, size=(200, 85))
@@ -1369,6 +1424,17 @@ class AddableList(Panel):
         self.listbox.Bind(wx.EVT_MENU, self.on_empty_menu)
         self.listbox.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_item_menu)
 
+        self.datas: dict[int, tuple[str, str]] = {}
+
+    def add_item(self, name: str, data: str, index: int = -1):
+        if index == -1:
+            index = self.listbox.GetCount()
+        self.listbox.Insert(name, index)
+        self.datas[index] = (name, data)
+
+    def on_add(self):
+        pass
+
     def on_empty_menu(self, event):
         menu = wx.Menu()
         menu.Append(wx.MenuItem(menu, 1, "添加"))
@@ -1381,11 +1447,11 @@ class AddableList(Panel):
         menu.Append(wx.MenuItem(menu, 2, "修改"))
         menu.Append(wx.MenuItem(menu, 3, "删除"))
         index = event.GetIndex()
-        menu.Bind(wx.EVT_MENU, lambda _: self.on_add(index), id=1)
+        menu.Bind(wx.EVT_MENU, lambda _: self.on_add(), id=1)
         menu.Bind(wx.EVT_MENU, lambda _: self.on_modify(index), id=2)
         menu.Bind(wx.EVT_MENU, lambda _: self.on_delete(index), id=3)
 
-    def on_add(self, index: int):
+    def on_add(self):
         pass
 
     def on_modify(self, index: int):
@@ -1394,37 +1460,99 @@ class AddableList(Panel):
     def on_delete(self, index: int):
         self.listbox.Delete(index)
 
+    def get_items(self) -> list[tuple[str, str]]:
+        return list(self.datas.keys())
+
+
+class ItemChoiceDialog(wx.Dialog):
+    def __init__(
+        self,
+        parent,
+        title: str,
+        choices: list[tuple[str, str]],
+        callback: Callable[[str], None],
+    ):
+        super().__init__(get_window(parent), title=title, size=(200, 250))
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.listbox = wx.ListBox(self, size=MAX_SIZE)
+        self.bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.empty = wx.Window(self)
+        self.ok_btn = wx.Button(self, label="确定")
+        self.cancel_btn = wx.Button(self, label="取消")
+
+        self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
+        self.cancel_btn.Bind(wx.EVT_BUTTON, lambda _: self.Close())
+        self.listbox.SetFont(ft(12))
+        self.ok_btn.SetFont(ft(12))
+        self.cancel_btn.SetFont(ft(12))
+
+        self.sizer.Add(self.listbox, wx.EXPAND)
+        self.bottom_sizer.Add(self.empty, flag=wx.EXPAND)
+        self.bottom_sizer.Add(self.ok_btn, proportion=0)
+        self.bottom_sizer.AddSpacer(6)
+        self.bottom_sizer.Add(self.cancel_btn, proportion=0)
+        self.sizer.Add(
+            self.bottom_sizer, flag=wx.EXPAND | wx.ALL, proportion=0, border=6
+        )
+        self.SetSizer(self.sizer)
+        self.SetIcon(wx.Icon(abspath("assets/select.ico"), wx.BITMAP_TYPE_ICO))
+        for name, _ in choices:
+            self.listbox.Append(name)
+
+        self.cbk = callback
+        self.choices = choices
+        self.ShowModal()
+
+    def on_ok(self, _):
+        select = self.listbox.GetSelection()
+        if select != wx.NOT_FOUND:
+            self.cbk(*self.choices[select])
+        self.Close()
+
 
 class StartPrqList(AddableList):
     def __init__(self, parent):
         super().__init__(parent, "开始条件")
 
-    def on_add(self, index: int):
-        pass
+    def on_add(self):
+        ItemChoiceDialog(
+            self, "选择开始条件", [("1", "条件1"), ("2", "条件2")], self.add_callback
+        )
+
+    def add_callback(self, name: str, data: str):
+        self.add_item(name, data)
 
 
 class EndPrqList(AddableList):
     def __init__(self, parent):
         super().__init__(parent, "结束条件")
 
-    def on_add(self, index: int):
-        pass
+    def on_add(self):
+        ItemChoiceDialog(
+            self, "选择结束条件", [("1", "条件1"), ("2", "条件2")], self.add_callback
+        )
+
+    def add_callback(self, name: str, data: str):
+        self.add_item(name, data)
 
 
 class ActionAddDialog(wx.Frame):
     def __init__(self, parent):
         assert isinstance(parent, ActionEditor)
         super().__init__(get_client(parent), title="动作编辑器", size=(420, 390))
+        self.action_editor = parent
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.name_inputter = LabelEntry(self, "名称: ")
         self.prq_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.start_prqs = StartPrqList(self)
         self.end_prqs = EndPrqList(self)
-        self.actions_chooser = LabelCombobox(self, "动作: ", ["动作1", "动作2"])
+        self.actions_chooser = LabelCombobox(
+            self, "动作: ", [("动作1", "114514"), ("动作2", "54188")]
+        )
         self.bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_btn = wx.Button(self, label="确定")
         self.cancel_btn = wx.Button(self, label="取消")
-        
+
         for i in range(10):
             self.start_prqs.listbox.Append(f"Test:{i}")
         self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
@@ -1432,8 +1560,10 @@ class ActionAddDialog(wx.Frame):
         self.ok_btn.SetFont(ft(12))
         self.cancel_btn.SetFont(ft(12))
         self.name_inputter.label_ctl.SetFont(ft(13))
+        self.name_inputter.text.SetFont(ft(12))
         self.actions_chooser.label_ctl.SetFont(ft(13))
-        
+        self.actions_chooser.combobox.SetFont(ft(12))
+
         self.sizer.Add(self.name_inputter, proportion=0)
         self.sizer.AddSpacer(6)
         self.prq_sizer.Add(self.start_prqs, flag=wx.EXPAND, proportion=50)
@@ -1449,13 +1579,23 @@ class ActionAddDialog(wx.Frame):
         self.SetSizer(self.sizer)
         self.SetIcon(wx.Icon(abspath(r"assets\action_editor.ico")))
         self.Show()
-    
+
     def on_ok(self, _):
+        name = self.name_inputter.text.GetValue()
+        start_prqs = self.start_prqs.get_items()
+        end_prqs = self.end_prqs.get_items()
+        if start_prqs == []:
+            start_prqs.append(NoneStartPrq())
+        if end_prqs == []:
+            end_prqs.append(NoneEndPrq())
+        action = BlueScreenAction()
+        actions = [action]
+        self.action_editor.add_action(name, start_prqs, end_prqs, actions)
         self.Close()
 
     def on_cancel(self, _):
         self.Close()
-        
+
 
 class ActionEditor(Panel):
     def __init__(self, parent: wx.Window):
@@ -1484,6 +1624,11 @@ class ActionEditor(Panel):
 
     def on_add_action(self, _):
         ActionAddDialog(self)
+
+    def add_action(
+        self, name: str, start_prqs: list, end_prqs: list, actions: list[AnAction]
+    ):
+        self.action_grid.add_action(name, start_prqs, end_prqs, actions)
 
 
 class ActionList(Panel):
@@ -1572,10 +1717,6 @@ class Client(wx.Frame):
 
     # noinspection PyAttributeOutsideInit
     def init_ui(self):
-        bmp = wx.Bitmap()
-        bmp.LoadFile(r"D:\Desktop\bg.png")
-        # self.background = wx.StaticBitmap(self, pos=(0, 0), size=self.GetSize(), bitmap=bmp)
-
         self.tab = wx.Notebook(self)
 
         self.screen_tab = ScreenTab(self.tab)
@@ -1594,7 +1735,8 @@ class Client(wx.Frame):
 
         self.SetIcon(GetSystemIcon(15))
         self.Bind(wx.EVT_CLOSE, self.on_close)
-        self.client_card = ClientCard(self.GetParent().servers_panel, self)
+        parent: ClientListWindow = self.GetParent()
+        self.client_card = parent.add_card(self)
 
     def reconnected(self, conn: socket.socket, addr: tuple[str, int], uuid: bytes):
         self.sock = conn
@@ -1779,6 +1921,13 @@ def get_client(widget: wx.Window) -> Client:
             return widget
 
 
+def get_window(widget: wx.Window) -> wx.Frame:
+    while True:
+        widget: wx.Window = widget.GetParent()
+        if isinstance(widget, wx.Frame):
+            return widget
+
+
 if __name__ == "__main__":
     app = wx.App()
     font: wx.Font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
@@ -1786,7 +1935,7 @@ if __name__ == "__main__":
     # wx.SizerFlags.DisableConsistencyChecks()
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("product")
     timer = perf_counter()
-    client_list = ClientList()
+    client_list = ClientListWindow()
     print(f"初始化时间: {perf_counter() - timer}")
     app.MainLoop()
 
