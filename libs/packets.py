@@ -3,11 +3,9 @@ from threading import Lock, Thread
 from time import perf_counter, sleep
 from typing import Any, Dict
 
-from win32api import GetSystemMetrics
 
 Packet = Dict[str, Any]
 WIDE_WIDTH = 1024 * 1024 * 1024 * 10
-MAX_SIZE = (GetSystemMetrics(0), GetSystemMetrics(1))
 
 
 def pack(datas: Packet):

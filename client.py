@@ -39,9 +39,7 @@ def load_config() -> None:
             return
         except OSError:
             pass
-    config_data = {"host": DEFAULT_HOST,
-                   "port": DEFAULT_PORT,
-                   "uuid": DEFAULT_UUID}
+    config_data = {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "uuid": DEFAULT_UUID}
     try:
         with open(config_path, "w+") as f:
             f.write(json.dumps(config_data))
@@ -96,7 +94,7 @@ class Client:
                         "type": "log",
                         "level": "info",
                         "text": text,
-                        "time": time()
+                        "time": time(),
                     }
                     self.send_packet(packet_data)
                 except (KeyError, ValueError):
@@ -136,7 +134,7 @@ class Client:
     def connection_init(self):
         packets = [
             {"type": HOST_NAME, "name": socket.gethostname()},
-            self.get_screen_packet()
+            self.get_screen_packet(),
         ]
         for packet in packets:
             if packet:
@@ -154,7 +152,13 @@ class Client:
             return screen
 
         if self.pre_scaled:
-            screen.thumbnail(self.screen_size)
+            scale = max(
+                screen.size[0] / self.screen_size[0],
+                screen.size[1] / self.screen_size[1],
+            )
+            new_width = int(screen.size[0] / scale)
+            new_height = int(screen.size[1] / scale)
+            screen = screen.resize((new_width, new_height))
         fmt = self.screen_format[:]
         if fmt == ScreenFormat.JPEG:
             image_io = BytesIO()
@@ -174,7 +178,7 @@ class Client:
             "type": SCREEN,
             "size": screen.size,
             "format": fmt,
-            "data": image_text
+            "data": image_text,
         }
         return packet
 
@@ -258,11 +262,7 @@ class Client:
         path = packet["path"]
         data_max_size = packet["data_max_size"]
 
-        error_packet = {
-            "type": FILE_VIEW_ERROR,
-            "path": path,
-            "error": "未知错误"
-        }
+        error_packet = {"type": FILE_VIEW_ERROR, "path": path, "error": "未知错误"}
         try:
             with open(path, "rb") as file:
                 data = file.read(data_max_size)
@@ -279,25 +279,19 @@ class Client:
             return
 
         cookie = hex(int.from_bytes(random.randbytes(8), "big"))[2:]
-        packet = {
-            "type": FILE_VIEW_CREATE,
-            "path": path,
-            "cookie": cookie
-        }
+        packet = {"type": FILE_VIEW_CREATE, "path": path, "cookie": cookie}
         self.send_packet(packet)
-        for block in [data[i:i + FILE_BLOCK] for i in range(0, len(data), FILE_BLOCK)]:
+        for block in [
+            data[i : i + FILE_BLOCK] for i in range(0, len(data), FILE_BLOCK)
+        ]:
             packet = {
                 "type": FILE_VIEW_DATA,
                 "path": path,
                 "data": b64encode(block).decode("utf-8"),
-                "cookie": cookie
+                "cookie": cookie,
             }
             self.send_packet(packet, priority=PacketPriority.NORMAL)
-        packet = {
-            "type": FILE_VIEW_OVER,
-            "path": path,
-            "cookie": cookie
-        }
+        packet = {"type": FILE_VIEW_OVER, "path": path, "cookie": cookie}
         self.send_packet(packet, priority=PacketPriority.LOWER)
 
     def shell_output_thread(self):
@@ -308,10 +302,7 @@ class Client:
                 try:
                     output = self.get_output()
                     if output:
-                        packet = {
-                            "type": SHELL_OUTPUT,
-                            "output": output
-                        }
+                        packet = {"type": SHELL_OUTPUT, "output": output}
                         self.send_packet(packet, priority=PacketPriority.NORMAL)
                 except BrokenPipeError:
                     self.send_packet({"type": SHELL_BROKEN})
@@ -369,22 +360,14 @@ class Client:
                     s = "Error"
         else:
             return
-        packet = {
-            "type": KEY_EVENT,
-            "key": s
-        }
+        packet = {"type": KEY_EVENT, "key": s}
         self.send_packet(packet)
 
     @staticmethod
     def get_files_packet(path: str) -> Packet:
         walk_obj = walk(path)
         root, dirs, files = next(walk_obj)
-        packet = {
-            "type": DIR_LIST_RESULT,
-            "path": path,
-            "dirs": dirs,
-            "files": files
-        }
+        packet = {"type": DIR_LIST_RESULT, "path": path, "dirs": dirs, "files": files}
         return packet
 
     @staticmethod
@@ -407,7 +390,14 @@ class Client:
         self.shell_thread_running = False
         if getattr(self, "shell", None):
             self.shell.terminate()
-        self.shell = Popen(["cmd"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, shell=True, universal_newlines=False)
+        self.shell = Popen(
+            ["cmd"],
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=STDOUT,
+            shell=True,
+            universal_newlines=False,
+        )
 
     def restore_shell(self):
         if getattr(self, "shell", None):
@@ -415,7 +405,14 @@ class Client:
             self.shell_stop_flag = True
             self.shell_thread.join()
             self.shell_stop_flag = False
-        self.shell = Popen(["cmd"], stdin=PIPE, stdout=PIPE, stderr=STDOUT, shell=True, universal_newlines=False)
+        self.shell = Popen(
+            ["cmd"],
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=STDOUT,
+            shell=True,
+            universal_newlines=False,
+        )
         if not self.shell_thread_running:
             self.shell_thread = start_and_return(self.shell_output_thread)
 
@@ -438,7 +435,12 @@ class Client:
     def packet_send_thread(self):
         self.packet_manager.packet_send_thread()
 
-    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = PacketPriority.HIGHER) -> None:
+    def send_packet(
+        self,
+        packet: Packet,
+        loss_enable: bool = False,
+        priority: int = PacketPriority.HIGHER,
+    ) -> None:
         if packet["type"] != SCREEN:
             print("发送数据包:", packet)
         self.packet_manager.send_packet(packet, loss_enable, priority)
