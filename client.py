@@ -1,5 +1,6 @@
 import json
 import random
+from PIL import Image
 from typing import Optional
 
 import win32api
@@ -141,6 +142,7 @@ class Client:
                 self.send_packet(packet)
 
     def get_screen_packet(self) -> Optional[Packet]:
+        cost = perf_counter()
         try:
             screen = self.camera.grab()
         except _ctypes.COMError:
@@ -150,6 +152,7 @@ class Client:
             return self.get_screen_packet()
         if screen is None:
             return screen
+        cost2 = perf_counter()
 
         if self.pre_scaled:
             scale = max(
@@ -158,7 +161,8 @@ class Client:
             )
             new_width = int(screen.size[0] / scale)
             new_height = int(screen.size[1] / scale)
-            screen = screen.resize((new_width, new_height))
+            screen = screen.resize((new_width, new_height), Image.BOX)
+        cost3 = perf_counter()
         fmt = self.screen_format[:]
         if fmt == ScreenFormat.JPEG:
             image_io = BytesIO()
@@ -172,14 +176,17 @@ class Client:
         else:
             self.screen_format = ScreenFormat.JPEG
             return self.get_screen_packet()
+        cost4 = perf_counter()
         image_bytes = image_io.getvalue()
         image_text = b64encode(image_bytes).decode("utf-8")
         packet = {
             "type": SCREEN,
             "size": screen.size,
             "format": fmt,
+            "pre_scale": self.pre_scaled,
             "data": image_text,
         }
+        # print(f"Cost: main->{ms(cost)} ms, grab->{ms(cost, cost2)} ms, scale->{ms(cost2, cost3)} ms, encode->{ms(cost3, cost4)} ms")
         return packet
 
     def screen_send_thread(self):

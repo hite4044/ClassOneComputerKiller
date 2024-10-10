@@ -25,6 +25,12 @@ def start_and_return(func, args=(), name: str = None):
     return thread
 
 
+def ms(start: float, end: float = None):
+    if end is None:
+        end = perf_counter()
+    return round((end - start) * 1000, 2)
+
+
 class ScreenFormat:
     PNG = "png"
     JPEG = "jpeg"

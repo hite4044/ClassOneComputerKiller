@@ -552,7 +552,7 @@ class ScreenFPSSetter(Panel):
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.StaticText(self, label="监视帧率:")
-        self.input_slider = InputSlider(self, value=15, _min=1, _max=30, _from=0, to=30)
+        self.input_slider = InputSlider(self, value=15, _min=1, _max=60, _from=0, to=60)
 
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
@@ -1497,12 +1497,19 @@ class Client(wx.Frame):
         else:
             raise RuntimeError("Error screen format")
 
-        if not self.pre_scale:
-            size = self.screen_tab.screen_panel.screen_shower.GetSize()
-            image.thumbnail(size)
+        if not packet["pre_scale"]:
+            target_size = self.screen_tab.screen_panel.screen_shower.GetSize()
+            scale = max(
+                image.size[0] / target_size[0],
+                image.size[1] / target_size[1],
+            )
+            new_width = int(image.size[0] / scale)
+            new_height = int(image.size[1] / scale)
+            
+            image = image.resize((new_width, new_height), Image.BOX)
             packet["size"] = image.size
         bitmap = wx.Bitmap.FromBuffer(*packet["size"], image.tobytes())
-        wx.CallAfter(self.set_screen, bitmap)
+        self.set_screen(bitmap)
         self.screen_counter += 1
         self.screen_network_counter += length
 
