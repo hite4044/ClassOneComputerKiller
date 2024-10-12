@@ -19,34 +19,49 @@ from dxcampil import create as create_camera
 
 from libs.packets import *
 
+# 全局变量（默认值）
 config_data = {}
-DEFAULT_HOST = "127.0.0.1"  # "cfc8522bc8db.ofalias.net"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 10616
-DEFAULT_UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]
-FILE_BLOCK = 1024 * 100
-reconnect_time = 2
+DEFAULT_UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 自动生成UUID
+DEFAULT_FILE_BLOCK_SIZE = 1024 * 100
+DEFAULT_RECONNECT_TIME = 2
 
-
-class ClientStopped(BaseException):
-    pass
-
-
+# 加载配置文件
 def load_config() -> None:
     global config_data
     config_path = abspath("config.json")
     if isfile(config_path):
         try:
-            config_data = json.load(open(config_path))
-            return
-        except OSError:
-            pass
-    config_data = {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "uuid": DEFAULT_UUID}
-    try:
-        with open(config_path, "w+") as f:
-            f.write(json.dumps(config_data))
-    except OSError:
-        pass
+            with open(config_path, "r") as f:
+                config_data = json.load(f)
+        except OSError as e:
+            print(f"Error loading config: {e}")
+            config_data = {}
 
+    # 设置默认值
+    config_data["host"] = config_data.get("host", DEFAULT_HOST)
+    config_data["port"] = config_data.get("port", DEFAULT_PORT)
+    config_data["uuid"] = config_data.get("uuid", hex(int.from_bytes(random.randbytes(8), "big"))[2:])
+    config_data["file_block_size"] = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
+    config_data["reconnect_time"] = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
+
+    # 将默认配置写回配置文件（如果文件缺少某些键）
+    try:
+        with open(config_path, "w") as f:
+            json.dump(config_data, f, indent=4)
+    except OSError as e:
+        print(f"Error saving config: {e}")
+
+# 加载配置
+load_config()
+
+# 使用配置中的值
+FILE_BLOCK = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
+reconnect_time = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
+
+class ClientStopped(BaseException):
+    pass
 
 class Client:
     def __init__(self, config: dict) -> None:
