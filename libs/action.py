@@ -1,6 +1,9 @@
 from os import system
+from typing import Any, Dict
 import win32gui
 import re
+
+Packet = Dict[str, Any]
 
 
 class ActionKind:
@@ -74,8 +77,9 @@ class LaunchAppStartPrq(StartPrq):
 
 
 class EndPrq:
-    def __init__(self, kind: int):
+    def __init__(self, kind: int, datas: list = []):
         self.kind = kind
+        self.datas = datas
 
     def valid(self) -> bool:
         return True
@@ -132,10 +136,13 @@ class TheAction:
         self.actions = actions
         self.start_prqs = start_prqs
         self.end_prqs = end_prqs
+    
+    def build_packet(self) -> Packet:
+        packet = {"name": self.name}
+        packet["actions"] = [(action.kind, action.datas) for action in self.actions]
+        packet["start_prqs"] = [(start_prq.kind, start_prq.datas) for start_prq in self.start_prqs]
+        packet["end_prqs"] = [(end_prq.kind, end_prq.datas) for end_prq in self.end_prqs]
+        return packet
 
     def __str__(self):
         return self.name
-        
-EndPrqs = [
-    
-]

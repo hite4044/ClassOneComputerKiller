@@ -123,38 +123,29 @@ class FilesData:
 
 class ClientsContainer(wx.ScrolledWindow):
     def __init__(self, parent: wx.Window):
-        super().__init__(parent=parent, size=(450, 500))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        super().__init__(parent=parent, size=(500, 515))
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.sizer.AddSpacer(1)
         self.SetSizer(self.sizer)
 
     def add_card(self, client_card):
         assert isinstance(client_card, ClientCard)
-        self.sizer.Add(client_card, wx.EXPAND)
+        self.sizer.Add(client_card, flag=wx.RIGHT, border=3)
 
 
 class ClientListWindow(wx.Frame):
     def __init__(self):
-        wx.Frame.__init__(self, parent=None, title="客户端列表", size=(670, 555))
+        wx.Frame.__init__(self, parent=None, title="客户端列表", size=(450, 515))
 
         self.clients = {}
         self.run_server()
         self.SetIcon(load_icon_file("assets/client_list.ico"))
 
         self.servers_container = ClientsContainer(self)
-        self.logs_text = wx.StaticText(self, label="日志")
-        self.logs_list = wx.ListBox(self, size=(200, 500))
 
-        self.logs_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.logs_sizer.Add(self.logs_text, wx.EXPAND)
-        self.logs_sizer.Add(self.logs_list, wx.EXPAND)
-        self.logs_sizer.Layout()
-
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.servers_container, wx.EXPAND)
-        self.sizer.Add(self.logs_sizer, wx.EXPAND)
-        self.sizer.Layout()
         self.SetSizer(self.sizer)
-        self.logs_text.SetFont(font)
 
         self.Show()
 
@@ -196,7 +187,7 @@ class ClientListWindow(wx.Frame):
 class ClientCard(Panel):
     def __init__(self, parent, client):
         assert isinstance(client, Client)
-        super().__init__(parent=parent, size=(550, 180))
+        super().__init__(parent=parent, size=(650, 88))
         self.client = client
 
         self.raw_set_bitmap = client.screen_tab.screen_panel.screen_shower.set_bitmap
@@ -552,7 +543,7 @@ class ScreenFPSSetter(Panel):
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.StaticText(self, label="监视帧率:")
-        self.input_slider = InputSlider(self, value=15, _min=1, _max=60, _from=0, to=60)
+        self.input_slider = InputSlider(self, value=10, _min=1, _max=60, _from=0, to=60)
 
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
@@ -1154,7 +1145,8 @@ class ActionGrid(grid.Grid):
             name, width = gui_data[i]
             self.SetColLabelValue(i, name)
             self.SetColSize(i, width)
-        self.datas = []
+        self.datas: list[TheAction] = []
+        self.first_add = True
         self.SetDefaultCellAlignment(wx.ALIGN_CENTER, wx.ALIGN_CENTER)
 
         self.SetRowLabelSize(1)
@@ -1169,13 +1161,19 @@ class ActionGrid(grid.Grid):
         end_prqs: list[EndPrq],
         actions: list[AnAction],
     ):
-        self.AppendRows(1)
+        if self.first_add:
+            self.AppendRows(1)
+            self.first_add = False
         row = self.GetNumberRows() - 1
+        
         self.SetCellValue(row, 0, name)
         self.SetCellValue(row, 1, " ".join([start.name() for start in start_prqs]))
         self.SetCellValue(row, 2, " ".join([action.name() for action in actions]))
         self.SetCellValue(row, 3, " ".join([end.name() for end in end_prqs]))
         self.datas.append(TheAction(name, actions, start_prqs, end_prqs))
+        
+    def build_action_packet(self, the_action: TheAction) -> Packet:
+        return the_action.build_packet()
 
 
 class StartPrqList(AddableList):
@@ -1416,6 +1414,16 @@ class Client(wx.Frame):
         self.connected = True
         self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
         self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
+        start_and_return(self.state_init, name="StateInit")
+
+    def state_init(self):
+        packet = {
+            "type": STATE_INFO,
+            "video_mode": self.sending_screen,
+            "monitor_fps": self.screen_tab.screen_panel.screen_controller.screen_fps_setter.input_slider.get_value(),
+            "monitor_quality": self.screen_tab.screen_panel.screen_controller.screen_quality_setter.input_slider.get_value(),
+        }
+        self.send_packet(packet)
 
     def packet_recv_thread(self) -> None:
         while self.connected:

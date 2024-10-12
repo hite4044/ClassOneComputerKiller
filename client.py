@@ -66,7 +66,7 @@ class Client:
 
         # 屏幕传输相关
         self.sending_screen = False  # 是否发送屏幕
-        self.screen_fps = 15  # 发送屏幕帧率
+        self.screen_fps = 10  # 发送屏幕帧率
         self.shell_stop_flag = False  # 是否停止shell
         self.screen_format: str = ScreenFormat.JPEG  # 屏幕传输格式
         self.screen_quality = 80  # 使用JPEG格式时的传输质量

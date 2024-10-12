@@ -179,6 +179,12 @@ FILE_WRITE = "file_write"  # Server
 REQ_LIST_DIR = "req_list_dir"  # Server
 SHELL_INIT = "shell_init"  # Server
 SHELL_INPUT = "shell_input"  # Server
+STATE_INFO = "state_info"  # Server
+ACTION_INFO = "action_info"  # Server
+ACTION_ADD = "action_add"  # Server
+ACTION_DEL = "action_del"  # Server
+ACTION_UPDATE = "action_update"  # Server
+ACTION_ENABLE = "action_enable"  # Server
 EVAL = "eval"  # Server
 
 # From Client
