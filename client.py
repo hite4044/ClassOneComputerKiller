@@ -1,23 +1,23 @@
 import json
 import random
-from PIL import Image
-from typing import Optional
-
-import win32api
 import _ctypes
+import win32api
 import win32con
+from PIL import Image
 from time import time
 from io import BytesIO
+from typing import Optional
 from os import walk, remove
 from pynput import keyboard
 from msvcrt import get_osfhandle
-from subprocess import Popen, PIPE, STDOUT
 from os.path import isfile, abspath
 from base64 import b64encode, b64decode
+from subprocess import Popen, PIPE, STDOUT
 from _winapi import PeekNamedPipe, ReadFile
 from dxcampil import create as create_camera
 
 from libs.packets import *
+from libs.action import *
 
 # 全局变量（默认值）
 config_data = {}
@@ -144,7 +144,8 @@ class Client:
                 print("\r没有接收到数据包", end="")
                 sleep(0.001)
                 continue
-            print("接收到数据包:", packet["type"])
+            if packet["type"] != PING:
+                print("接收到数据包:", packet_str(packet))
             if not self.parse_packet(packet):
                 raise ClientStopped
         # self.key_listener.stop()
@@ -283,6 +284,8 @@ class Client:
                 self.shell.stdin.flush()
             except OSError:
                 self.send_packet({"type": SHELL_BROKEN})
+        elif packet["type"] == PING:
+                self.send_packet({"type": "pong", "timer": packet["timer"]}, priority=Priority.HIGHEST)
         return True
 
     def file_view_thread(self, packet: Packet):
@@ -317,9 +320,9 @@ class Client:
                 "data": b64encode(block).decode("utf-8"),
                 "cookie": cookie,
             }
-            self.send_packet(packet, priority=PacketPriority.NORMAL)
+            self.send_packet(packet, priority=Priority.NORMAL)
         packet = {"type": FILE_VIEW_OVER, "path": path, "cookie": cookie}
-        self.send_packet(packet, priority=PacketPriority.LOWER)
+        self.send_packet(packet, priority=Priority.LOWER)
 
     def shell_output_thread(self):
         self.shell_thread_running = True
@@ -330,7 +333,7 @@ class Client:
                     output = self.get_output()
                     if output:
                         packet = {"type": SHELL_OUTPUT, "output": output}
-                        self.send_packet(packet, priority=PacketPriority.NORMAL)
+                        self.send_packet(packet, priority=Priority.NORMAL)
                 except BrokenPipeError:
                     self.send_packet({"type": SHELL_BROKEN})
                     break
@@ -472,10 +475,10 @@ class Client:
         self,
         packet: Packet,
         loss_enable: bool = False,
-        priority: int = PacketPriority.HIGHER,
+        priority: int = Priority.HIGHER,
     ) -> None:
-        if packet["type"] != SCREEN:
-            print("发送数据包:", packet)
+        if packet["type"] != SCREEN and packet["type"] != PONG:
+            print("发送数据包:", packet_str(packet))
         self.packet_manager.send_packet(packet, loss_enable, priority)
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:

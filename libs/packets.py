@@ -1,6 +1,7 @@
 import socket
 from threading import Lock, Thread
 from time import perf_counter, sleep
+from copy import copy
 from typing import Any, Dict
 
 
@@ -31,20 +32,29 @@ def ms(start: float, end: float = None):
     return round((end - start) * 1000, 2)
 
 
+def packet_str(packet: Packet):
+    new_packet = {}
+    for name, value in packet.items():
+        if isinstance(value, str) and len(value) > 30:
+            value = value[:12] + "..." + value[-12:]
+        new_packet[name] = value
+    return str(new_packet)
+
+
 class ScreenFormat:
     PNG = "png"
     JPEG = "jpeg"
     RAW = "raw"
 
 
-class PacketPriority:
-    TOP = 0
+class Priority:
+    HIGHEST = 0
     HIGH = 1
     HIGHER = 2
     NORMAL = 3
     LOWER = 4
     LOW = 5
-    priorities = [TOP, HIGH, HIGHER, NORMAL, LOWER, LOW]
+    priorities = [HIGHEST, HIGH, HIGHER, NORMAL, LOWER, LOW]
 
 
 class Actions:
@@ -79,12 +89,12 @@ class PacketManager:
         # noinspection PyTypeChecker
         self.sock: socket.socket = sock
         self.stack_lock = Lock()
-        self.packet_stack = {priority: [] for priority in PacketPriority.priorities}
+        self.packet_stack = {priority: [] for priority in Priority.priorities}
         self.next_loss = False
         self.connected = connected
 
     def init_stack(self):
-        self.packet_stack = {priority: [] for priority in PacketPriority.priorities}
+        self.packet_stack = {priority: [] for priority in Priority.priorities}
 
     def set_socket(self, sock: socket.socket):
         self.sock = sock
@@ -93,7 +103,7 @@ class PacketManager:
         while self.connected:
             # 取包
             with self.stack_lock:
-                for priority in PacketPriority.priorities:
+                for priority in Priority.priorities:
                     try:
                         packet, loss_enable = self.packet_stack[priority].pop(0)
                         break
@@ -108,7 +118,6 @@ class PacketManager:
             # print("发送数据包:", packet["type"])
 
             # 发包
-            packet = pack(packet)
             length = len(packet)
             timer = perf_counter()
             all_sent = 0
@@ -133,8 +142,8 @@ class PacketManager:
                 if length <= 0:
                     break
 
-    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = PacketPriority.HIGHER) -> None:
-        self.packet_stack[priority].append((packet, loss_enable))
+    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER) -> None:
+        self.packet_stack[priority].append((pack(packet), loss_enable))
         # print("加入数据包队列:", packet["type"])
 
     def recv_length(self, length) -> bytes:
@@ -185,20 +194,22 @@ ACTION_ADD = "action_add"  # Server
 ACTION_DEL = "action_del"  # Server
 ACTION_UPDATE = "action_update"  # Server
 ACTION_ENABLE = "action_enable"  # Server
+PING = "ping"  # Server
 EVAL = "eval"  # Server
 
 # From Client
+LOG = "log"  # Client
+SCREEN = "screen"  # Client
 KEY_EVENT = "key_event"  # Client
 MOUSE_EVENT = "mouse_event"  # Client
-SCREEN = "screen"  # Client
 SHELL_OUTPUT = "shell_output"  # Client
 SHELL_BROKEN = "shell_broken"  # Client
 EVAL_RESULT = "eval_result"  # Client
 HOST_NAME = "host_name"  # Client
 SCREEN_RAW_SIZE = "screen_raw_size"  # Client
-LOG = "log"  # Client
 DIR_LIST_RESULT = "dir_list_result"  # Client
 FILE_VIEW_CREATE = "file_view_create"  # Client
 FILE_VIEW_DATA = "file_view_data"  # Client
 FILE_VIEW_OVER = "file_view_over"  # Client
 FILE_VIEW_ERROR = "file_view_error"  # Client
+PONG = "pong"  # Client

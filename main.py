@@ -45,11 +45,7 @@ def format_size(size_in_bytes) -> str:
 def extension_to_bitmap(extension) -> wx.Bitmap:
     """dot is mandatory in extension"""
 
-    flags = (
-        shellcon.SHGFI_SMALLICON
-        | shellcon.SHGFI_ICON
-        | shellcon.SHGFI_USEFILEATTRIBUTES
-    )
+    flags = shellcon.SHGFI_SMALLICON | shellcon.SHGFI_ICON | shellcon.SHGFI_USEFILEATTRIBUTES
     retval, info = shell.SHGetFileInfo(extension, FILE_ATTRIBUTE_NORMAL, flags)
     assert retval
     hicon, _, _, _, _ = info
@@ -61,9 +57,7 @@ def extension_to_bitmap(extension) -> wx.Bitmap:
 
 
 def GetSystemIcon(index: int) -> wx.Icon:
-    shell32dll = ctypes.create_string_buffer(
-        "C:\\Windows\\System32\\shell32.dll".encode(), 260
-    )
+    shell32dll = ctypes.create_string_buffer("C:\\Windows\\System32\\shell32.dll".encode(), 260)
     small_icon = wintypes.HICON()
     ExtractIconExA(
         ctypes.cast(shell32dll, ctypes.c_char_p),
@@ -237,9 +231,7 @@ class ClientCard(Panel):
             border=8,
             proportion=0,
         )
-        self.main_sizer.Add(
-            self.mid_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.LEFT, border=9
-        )
+        self.main_sizer.Add(self.mid_sizer, flag=wx.EXPAND | wx.ALIGN_LEFT | wx.TOP | wx.LEFT, border=9)
         self.main_sizer.AddSpacer(10)
         self.main_sizer.Add(
             self.right_sizer,
@@ -287,9 +279,7 @@ class ClientCard(Panel):
             time = localtime(perf_counter() - self.client.connected_start)
             time_str = f"{str(time.tm_hour - 8).zfill(2)}:{str(time.tm_min).zfill(2)}:{str(time.tm_sec).zfill(2)}"
             self.state_infer.SetLabel(f"已连接: {time_str}")
-            self.network_up.SetLabel(
-                f"↑ {format_size(self.upload_counter / self.data_update_inv)}/s"
-            )
+            self.network_up.SetLabel(f"↑ {format_size(self.upload_counter / self.data_update_inv)}/s")
             self.network_down.SetLabel(
                 f"↓ {format_size(self.download_counter / self.data_update_inv)}/s"
             )
@@ -481,15 +471,9 @@ class ScreenFormatSetter(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         self.text = wx.StaticText(self, label="屏幕格式:")
-        self.jpg_button = FormatRadioButton(
-            self, "JPG", ScreenFormat.JPEG, self.set_format
-        )
-        self.png_button = FormatRadioButton(
-            self, "PNG", ScreenFormat.PNG, self.set_format
-        )
-        self.raw_button = FormatRadioButton(
-            self, "Raw", ScreenFormat.RAW, self.set_format
-        )
+        self.jpg_button = FormatRadioButton(self, "JPG", ScreenFormat.JPEG, self.set_format)
+        self.png_button = FormatRadioButton(self, "PNG", ScreenFormat.PNG, self.set_format)
+        self.raw_button = FormatRadioButton(self, "Raw", ScreenFormat.RAW, self.set_format)
         self.pre_scale_box = PreScaleCheckBox(self)
 
         self.sizer.AddSpacer(10)
@@ -564,9 +548,7 @@ class ScreenQualitySetter(Panel):
 
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.StaticText(self, label="屏幕质量:")
-        self.input_slider = InputSlider(
-            self, value=80, _min=1, _max=100, _from=0, to=100
-        )
+        self.input_slider = InputSlider(self, value=80, _min=1, _max=100, _from=0, to=100)
 
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
@@ -586,26 +568,31 @@ class ScreenInformationShower(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.FPS_text = wx.StaticText(self, label="FPS: 0")
         self.network_text = wx.StaticText(self, label="占用带宽: 0 KB/s")
+        self.delay_text = wx.StaticText(self, label="延迟: 0 ms")
         self.sizer.AddSpacer(10)
         self.sizer.Add(self.FPS_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
         self.sizer.AddSpacer(100)
-        self.sizer.Add(
-            self.network_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3
-        )
+        self.sizer.Add(self.network_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
+        self.sizer.AddSpacer(100)
+        self.sizer.Add(self.delay_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
 
         BToolTip(self.FPS_text, "反映了屏幕传输的流畅度", ft(10))
         BToolTip(self.network_text, "屏幕传输占用的带宽", ft(10))
         self.SetSizer(self.sizer)
         self.FPS_text.SetFont(ft(14))
         self.network_text.SetFont(ft(14))
+        self.delay_text.SetFont(ft(14))
 
         self.fps_avg = []
         self.network_avg = []
         self.collect_inv = 0.5
         self.client = get_client(self)
-        self.FPS_timer = wx.Timer(self)
-        self.Bind(wx.EVT_TIMER, self.update_data, self.FPS_timer)
-        self.FPS_timer.Start(int(self.collect_inv * 1000))
+        self.update_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.update_data, self.update_timer)
+        self.update_timer.Start(int(self.collect_inv * 1000))
+        self.delay_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.req_update_data, self.delay_timer)
+        self.delay_timer.Start(1000)
 
     def update_data(self, event: wx.TimerEvent = None):
         self.update_fps()
@@ -613,14 +600,16 @@ class ScreenInformationShower(Panel):
         if event:
             event.Skip()
 
+    def req_update_data(self, event: wx.TimerEvent = None):
+        self.client.send_packet({"type": PING, "timer": perf_counter()}, priority=Priority.HIGHEST)
+        event.Skip()
+
     def update_fps(self):
         self.fps_avg.append(self.client.screen_counter / self.collect_inv)
         self.client.screen_counter = 0
         if len(self.fps_avg) > 10:
             self.fps_avg.pop(0)
-        self.FPS_text.SetLabel(
-            "FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1))
-        )
+        self.FPS_text.SetLabel("FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1)))
 
     def update_network(self):
         self.network_avg.append(self.client.screen_network_counter / self.collect_inv)
@@ -628,10 +617,11 @@ class ScreenInformationShower(Panel):
         if len(self.network_avg) > 10:
             self.network_avg.pop(0)
         self.network_text.SetLabel(
-            "占用带宽: "
-            + format_size(sum(self.network_avg) / len(self.network_avg))
-            + " /s"
+            "占用带宽: " + format_size(sum(self.network_avg) / len(self.network_avg)) + " /s"
         )
+
+    def update_delay(self, delay: int):
+        self.delay_text.SetLabel(f"延迟: {round(delay*1000, 2)} ms")
 
 
 class ScreenController(Panel):
@@ -667,9 +657,7 @@ class ScreenPanel(Panel):
 
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.screen_shower, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=1)
-        self.sizer.Add(
-            self.screen_controller, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0
-        )
+        self.sizer.Add(self.screen_controller, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0)
         self.sizer.Layout()
         self.SetSizer(self.sizer)
 
@@ -736,9 +724,7 @@ class ScreenTab(Panel):
 
 class FilesTreeView(wx.TreeCtrl):
     def __init__(self, parent):
-        super().__init__(
-            parent=parent, size=MAX_SIZE, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT
-        )
+        super().__init__(parent=parent, size=MAX_SIZE, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT)
         self.SetFont(font)
 
         self.image_list = wx.ImageList(16, 16, True)
@@ -788,9 +774,7 @@ class FilesTreeView(wx.TreeCtrl):
             if "." in file_name:
                 extension = file_name.split(".")[-1]
                 if extension not in self.icons:
-                    self.icons[extension] = self.image_list.Add(
-                        extension_to_bitmap("." + extension)
-                    )
+                    self.icons[extension] = self.image_list.Add(extension_to_bitmap("." + extension))
                 icon = self.icons[extension]
             else:
                 icon = self.default_file_icon
@@ -1033,9 +1017,7 @@ class TerminalInput(Panel):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text = wx.TextCtrl(self, size=(1200, 28), style=wx.TE_PROCESS_ENTER)
         self.send_button = wx.Button(self, label="发送", size=(75, 31))
-        self.sizer.Add(
-            self.text, flag=wx.ALIGN_TOP | wx.EXPAND | wx.TOP, border=1, proportion=1
-        )
+        self.sizer.Add(self.text, flag=wx.ALIGN_TOP | wx.EXPAND | wx.TOP, border=1, proportion=1)
         self.sizer.AddSpacer(3)
         self.sizer.Add(self.send_button, flag=wx.ALIGN_TOP, proportion=0)
         self.sizer.AddSpacer(2)
@@ -1080,10 +1062,7 @@ class TerminalInput(Panel):
                 self.on_tip = True
 
     def on_enter(self, event: wx.KeyEvent):
-        if (
-            event.GetKeyCode() == wx.WXK_NUMPAD_ENTER
-            or event.GetKeyCode() == wx.WXK_RETURN
-        ):
+        if event.GetKeyCode() == wx.WXK_NUMPAD_ENTER or event.GetKeyCode() == wx.WXK_RETURN:
             self.send()
         elif event.GetKeyCode() == wx.WXK_UP:
             if self.history_index > 0:
@@ -1147,6 +1126,7 @@ class ActionGrid(grid.Grid):
             self.SetColSize(i, width)
         self.datas: list[TheAction] = []
         self.first_add = True
+        self.client = get_client(self)
         self.SetDefaultCellAlignment(wx.ALIGN_CENTER, wx.ALIGN_CENTER)
 
         self.SetRowLabelSize(1)
@@ -1165,15 +1145,14 @@ class ActionGrid(grid.Grid):
             self.AppendRows(1)
             self.first_add = False
         row = self.GetNumberRows() - 1
-        
+
         self.SetCellValue(row, 0, name)
         self.SetCellValue(row, 1, " ".join([start.name() for start in start_prqs]))
         self.SetCellValue(row, 2, " ".join([action.name() for action in actions]))
         self.SetCellValue(row, 3, " ".join([end.name() for end in end_prqs]))
-        self.datas.append(TheAction(name, actions, start_prqs, end_prqs))
-        
-    def build_action_packet(self, the_action: TheAction) -> Packet:
-        return the_action.build_packet()
+        the_action = TheAction(name, actions, start_prqs, end_prqs)
+        self.datas.append(the_action)
+        self.client.send_packet(the_action.build_packet())
 
 
 class StartPrqList(AddableList):
@@ -1181,9 +1160,7 @@ class StartPrqList(AddableList):
         super().__init__(parent, "开始条件")
 
     def on_add(self):
-        ItemChoiceDialog(
-            self, "选择开始条件", [("1", "条件1"), ("2", "条件2")], self.add_callback
-        )
+        ItemChoiceDialog(self, "选择开始条件", [("1", "条件1"), ("2", "条件2")], self.add_callback)
 
     def add_callback(self, name: str, data: str):
         self.add_item(name, data)
@@ -1194,9 +1171,7 @@ class EndPrqList(AddableList):
         super().__init__(parent, "结束条件")
 
     def on_add(self):
-        ItemChoiceDialog(
-            self, "选择结束条件", [("1", "条件1"), ("2", "条件2")], self.add_callback
-        )
+        ItemChoiceDialog(self, "选择结束条件", [("1", "条件1"), ("2", "条件2")], self.add_callback)
 
     def add_callback(self, name: str, data: str):
         self.add_item(name, data)
@@ -1212,9 +1187,7 @@ class ActionAddDialog(wx.Frame):
         self.prq_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.start_prqs = StartPrqList(self)
         self.end_prqs = EndPrqList(self)
-        self.actions_chooser = LabelCombobox(
-            self, "动作: ", [("动作1", "114514"), ("动作2", "54188")]
-        )
+        self.actions_chooser = LabelCombobox(self, "动作: ", [("动作1", "114514"), ("动作2", "54188")])
         self.bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_btn = wx.Button(self, label="确定")
         self.cancel_btn = wx.Button(self, label="取消")
@@ -1291,9 +1264,7 @@ class ActionEditor(Panel):
     def on_add_action(self, _):
         ActionAddDialog(self)
 
-    def add_action(
-        self, name: str, start_prqs: list, end_prqs: list, actions: list[AnAction]
-    ):
+    def add_action(self, name: str, start_prqs: list, end_prqs: list, actions: list[AnAction]):
         self.action_grid.add_action(name, start_prqs, end_prqs, actions)
 
 
@@ -1311,9 +1282,7 @@ class ActionList(Panel):
         self.text.SetFont(ft(13))
         self.action_listbox.SetFont(font)
 
-        self.top_sizer.Add(
-            self.text, flag=wx.EXPAND | wx.TOP | wx.LEFT, proportion=1, border=4
-        )
+        self.top_sizer.Add(self.text, flag=wx.EXPAND | wx.TOP | wx.LEFT, proportion=1, border=4)
         self.top_sizer.Add(self.add_btn, flag=wx.TOP | wx.RIGHT, proportion=0, border=4)
         self.sizer.Add(
             self.top_sizer,
@@ -1341,9 +1310,7 @@ class ActionTab(Panel):
         self.action_editor = ActionEditor(self)
         self.action_list = ActionList(self)
         self.sizer.Add(self.action_editor, flag=wx.EXPAND, proportion=1)
-        self.sizer.Add(
-            self.action_list, flag=wx.EXPAND | wx.ALL, proportion=0, border=5
-        )
+        self.sizer.Add(self.action_list, flag=wx.EXPAND | wx.ALL, proportion=0, border=5)
         self.SetSizer(self.sizer)
 
 
@@ -1355,9 +1322,7 @@ class Client(wx.Frame):
         address: tuple[str, int],
         uuid: bytes,
     ):
-        wx.Frame.__init__(
-            self, parent=parent, title=DEFAULT_COMPUTER_TEXT, size=(1250, 772)
-        )
+        wx.Frame.__init__(self, parent=parent, title=DEFAULT_COMPUTER_TEXT, size=(1250, 772))
 
         self.sock = sock
         self.address = address
@@ -1436,8 +1401,8 @@ class Client(wx.Frame):
                 print("没有接收到数据包")
                 sleep(0.001)
                 continue
-            if packet["type"] != SCREEN:
-                print("接收到数据包:", packet)
+            if packet["type"] != SCREEN and packet["type"] != PONG:
+                print("接收到数据包:", packet_str(packet))
             if not self.parse_packet(packet, length):
                 return
         print("Recv Thread Exit")
@@ -1480,6 +1445,10 @@ class Client(wx.Frame):
             self.terminal_panel.text.load_packet(packet)
         elif packet["type"] == SHELL_BROKEN:
             wx.CallAfter(self.shell_broke_tip)
+        elif packet["type"] == PONG:
+            self.screen_tab.screen_panel.screen_controller.screen_information_shower.update_delay(
+                perf_counter() - packet["timer"]
+            )
         return True
 
     def shell_broke_tip(self):
@@ -1513,7 +1482,7 @@ class Client(wx.Frame):
             )
             new_width = int(image.size[0] / scale)
             new_height = int(image.size[1] / scale)
-            
+
             image = image.resize((new_width, new_height), Image.BOX)
             packet["size"] = image.size
         bitmap = wx.Bitmap.FromBuffer(*packet["size"], image.tobytes())
@@ -1560,9 +1529,7 @@ class Client(wx.Frame):
 
     def set_screen_send(self, enable: bool):
         self.sending_screen = enable
-        self.screen_tab.screen_panel.screen_controller.control_setter.video_mode_ctl.SetValue(
-            enable
-        )
+        self.screen_tab.screen_panel.screen_controller.control_setter.video_mode_ctl.SetValue(enable)
         packet = {"type": SET_SCREEN_SEND, "enable": enable}
         self.send_packet(packet)
 
@@ -1575,9 +1542,10 @@ class Client(wx.Frame):
         self.packet_manager.packet_send_thread()
         print("Send Thread Exited")
 
-    def send_packet(self, packet: Packet, loss_enable: bool = False) -> None:
-        print(f"发送数据包: {packet}")
-        self.packet_manager.send_packet(packet, loss_enable)
+    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER) -> None:
+        if packet["type"] != PING:
+            print(f"发送数据包: {packet_str(packet)}")
+        self.packet_manager.send_packet(packet, loss_enable, priority)
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
         return self.packet_manager.recv_packet()
