@@ -26,6 +26,7 @@ DEFAULT_PORT = 10616
 DEFAULT_UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 自动生成UUID
 DEFAULT_FILE_BLOCK_SIZE = 1024 * 100
 DEFAULT_RECONNECT_TIME = 2
+DEFAULT_CONNECT_TIMEOUT = 2
 
 # 加载配置文件
 def load_config() -> None:
@@ -40,11 +41,14 @@ def load_config() -> None:
             config_data = {}
 
     # 设置默认值
+    if config_data["uuid"] == None:
+        config_data["uuid"] = DEFAULT_UUID
     config_data["host"] = config_data.get("host", DEFAULT_HOST)
     config_data["port"] = config_data.get("port", DEFAULT_PORT)
-    config_data["uuid"] = config_data.get("uuid", hex(int.from_bytes(random.randbytes(8), "big"))[2:])
+    config_data["uuid"] = config_data.get("uuid", DEFAULT_UUID)
     config_data["file_block_size"] = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
     config_data["reconnect_time"] = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
+    config_data["connect_timeout"] = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
 
     # 将默认配置写回配置文件（如果文件缺少某些键）
     try:
@@ -59,6 +63,7 @@ load_config()
 # 使用配置中的值
 FILE_BLOCK = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
 reconnect_time = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
+connect_timeout = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
 
 class ClientStopped(BaseException):
     pass
@@ -353,7 +358,7 @@ class Client:
     def connect_until(self):
         """重复连接直到连接成功"""
         global reconnect_time
-        reconnect_time = 2
+        reconnect_time = config_data["reconnect_time"]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         while not self.connected:
             if self.try_connect():
@@ -363,6 +368,7 @@ class Client:
             reconnect_time = int(reconnect_time)
             if reconnect_time > 60:
                 reconnect_time = 60
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def on_key_press(self, key):
         start_and_return(self._on_key_press, (key,))
@@ -441,6 +447,7 @@ class Client:
     def try_connect(self) -> bool:
         try:
             print("尝试连接至服务器")
+            self.sock.settimeout(connect_timeout)
             self.sock.connect((self.host, self.port))
             self.packet_manager.init_stack()
             self.init_var()
@@ -451,6 +458,10 @@ class Client:
             return True
         except ConnectionError as e:
             print("连接时发生错误:", e)
+            self.connected = False
+            return False
+        except TimeoutError:
+            print("连接超时")
             self.connected = False
             return False
 
