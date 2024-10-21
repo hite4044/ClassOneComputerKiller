@@ -17,6 +17,7 @@ from os.path import join as path_join, normpath, abspath
 app = wx.App()
 from libs.action import *
 from libs.widgets import *
+from libs.api import ClientAPI, get_api, get_window_name
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
 MAX_HISTORY_LENGTH = 100000
@@ -303,7 +304,7 @@ class ScreenShower(Panel):
         self.bmp = None
         self.last_size_send = perf_counter()
         self.last_move_send = perf_counter()
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.button_map = {
             wx.MOUSE_BTN_LEFT: "left",
             wx.MOUSE_BTN_RIGHT: "right",
@@ -328,7 +329,7 @@ class ScreenShower(Panel):
             event.Skip()
 
     def on_size(self, event: wx.Event = None):
-        if self.client.pre_scale and self.client.sending_screen:
+        if self.api.pre_scale and self.api.sending_screen:
             if perf_counter() - self.last_size_send > 0.1:
                 new_size = self.GetSize()
                 if 0 in new_size:
@@ -339,7 +340,7 @@ class ScreenShower(Panel):
                         "data_max_size": 1024 * 1024,
                         "size": tuple(new_size),
                     }
-                    self.client.send_packet(packet)
+                    self.api.send_packet(packet)
                     self.last_size = new_size
                     self.last_size_send = perf_counter()
         if event:
@@ -351,19 +352,19 @@ class ScreenShower(Panel):
         item: wx.MenuItem = menu.Append(2, "视频模式", kind=wx.ITEM_CHECK)
         menu.Bind(wx.EVT_MENU, self.send_get_screen, id=1)
         menu.Bind(wx.EVT_MENU, self.send_video_mode, id=2)
-        item.Check(self.client.sending_screen)
+        item.Check(self.api.sending_screen)
         self.PopupMenu(menu)
         self.menu = menu
 
     def send_get_screen(self, _):
         packet = {"type": GET_SCREEN}
-        self.client.send_packet(packet)
+        self.api.send_packet(packet)
 
     def send_video_mode(self, _):
-        self.client.set_screen_send(not self.client.sending_screen)
+        self.api.set_screen_send(not self.api.sending_screen)
 
     def on_mouse(self, event: wx.MouseEvent):
-        if self.client.mouse_control:
+        if self.api.mouse_control:
             packet = None
             if event.Moving() and perf_counter() - self.last_move_send > 0.1:
                 packet = {"type": SET_MOUSE_POS, "x": event.GetX(), "y": event.GetY()}
@@ -387,7 +388,7 @@ class ScreenShower(Panel):
                     }
 
             if packet:
-                self.client.send_packet(packet)
+                self.api.send_packet(packet)
         if event:
             event.Skip()
 
@@ -402,21 +403,21 @@ class ComputerControlSetter(Panel):
         self.mouse_ctl = wx.CheckBox(self, label="鼠标控制")
         self.mouse_ctl.Bind(
             wx.EVT_CHECKBOX,
-            lambda _: self.client.set_mouse_ctl(self.mouse_ctl.GetValue()),
+            lambda _: self.api.set_mouse_ctl(self.mouse_ctl.GetValue()),
         )
         self.keyboard_ctl = wx.CheckBox(self, label="键盘控制")
         self.keyboard_ctl.Bind(
             wx.EVT_CHECKBOX,
-            lambda _: self.client.set_keyboard_ctl(self.keyboard_ctl.GetValue()),
+            lambda _: self.api.set_keyboard_ctl(self.keyboard_ctl.GetValue()),
         )
         self.video_mode_ctl = wx.CheckBox(self, label="视频模式")
         self.video_mode_ctl.Bind(
             wx.EVT_CHECKBOX,
-            lambda _: self.client.set_screen_send(self.video_mode_ctl.GetValue()),
+            lambda _: self.api.set_screen_send(self.video_mode_ctl.GetValue()),
         )
         self.get_screen_btn = wx.Button(self, label="获取屏幕")
         self.get_screen_btn.Bind(wx.EVT_BUTTON, self.send_get_screen)
-        self.client = get_client(self)
+        self.api = get_api(self)
 
         self.text.SetFont(ft(14))
 
@@ -438,7 +439,7 @@ class ComputerControlSetter(Panel):
 
     def send_get_screen(self, _):
         packet = {"type": GET_SCREEN, "size": tuple(self.GetSize())}
-        self.client.send_packet(packet)
+        self.api.send_packet(packet)
 
 
 class FormatRadioButton(wx.RadioButton):
@@ -451,12 +452,13 @@ class FormatRadioButton(wx.RadioButton):
 class PreScaleCheckBox(wx.CheckBox):
     def __init__(self, parent):
         super().__init__(parent=parent, label="预缩放")
+        self.api = get_api(self)
         self.Bind(wx.EVT_CHECKBOX, self.OnSwitch)
         self.SetValue(True)
 
     def OnSwitch(self, _):
         enable = self.GetValue()
-        get_client(self).set_pre_scale(enable)
+        self.api.set_pre_scale(enable)
 
 
 class ScreenFormatSetter(Panel):
@@ -486,6 +488,7 @@ class ScreenFormatSetter(Panel):
         self.sizer.Layout()
         self.SetSizer(self.sizer)
         self.text.SetFont(ft(14))
+        self.api = get_api(self)
 
         BToolTip(self.text, "在屏幕的网络传输中使用的格式", ft(10))
         BToolTip(self.pre_scale_box, "占用更少带宽", ft(10))
@@ -497,7 +500,7 @@ class ScreenFormatSetter(Panel):
         self.Update()
 
     def set_format(self, value: str):
-        controller = get_client(self).screen_tab.screen_panel.controller
+        controller: ScreenController = self.api.client.screen_tab.screen_panel.controller
         if value != ScreenFormat.JPEG:
             controller.sizer.Hide(controller.screen_quality_setter)
         else:
@@ -507,9 +510,8 @@ class ScreenFormatSetter(Panel):
     def _set_format(self, value: str):
         with self.format_lock:
             packet = {"type": SET_SCREEN_FORMAT, "format": value}
-            client: Client = get_client(self)
-            if client.connected:
-                client.send_packet(packet)
+            if self.api.connected:
+                self.api.send_packet(packet)
 
 
 class ScreenFPSSetter(Panel):
@@ -528,7 +530,7 @@ class ScreenFPSSetter(Panel):
         BToolTip(self.text, "屏幕传输的帧率\n帧率越高, 带宽占用越大", ft(10))
 
         self.text.SetFont(ft(14))
-        self.input_slider.cbk = get_client(self).set_screen_fps
+        self.input_slider.cbk = get_api(self).set_screen_fps
         self.SetSizer(self.sizer)
         self.Update()
 
@@ -548,7 +550,7 @@ class ScreenQualitySetter(Panel):
 
         BToolTip(self.text, "屏幕传输的质量\n质量越高, 带宽占用越大", ft(10))
         self.text.SetFont(ft(14))
-        self.input_slider.cbk = get_client(self).set_screen_quality
+        self.input_slider.cbk = get_api(self).set_screen_quality
         self.SetSizer(self.sizer)
 
 
@@ -576,7 +578,7 @@ class ScreenInformationShower(Panel):
         self.fps_avg = []
         self.network_avg = []
         self.collect_inv = 0.5
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.update_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.update_data, self.update_timer)
         self.update_timer.Start(int(self.collect_inv * 1000))
@@ -591,19 +593,19 @@ class ScreenInformationShower(Panel):
             event.Skip()
 
     def req_update_data(self, event: wx.TimerEvent = None):
-        self.client.send_packet({"type": PING, "timer": perf_counter()}, priority=Priority.HIGHEST)
+        self.api.send_packet({"type": PING, "timer": perf_counter()}, priority=Priority.HIGHEST)
         event.Skip()
 
     def update_fps(self):
-        self.fps_avg.append(self.client.screen_counter / self.collect_inv)
-        self.client.screen_counter = 0
+        self.fps_avg.append(self.api.screen_counter / self.collect_inv)
+        self.api.screen_counter = 0
         if len(self.fps_avg) > 10:
             self.fps_avg.pop(0)
         self.FPS_text.SetLabel("FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1)))
 
     def update_network(self):
-        self.network_avg.append(self.client.screen_network_counter / self.collect_inv)
-        self.client.screen_network_counter = 0
+        self.network_avg.append(self.api.screen_network_counter / self.collect_inv)
+        self.api.screen_network_counter = 0
         if len(self.network_avg) > 10:
             self.network_avg.pop(0)
         self.network_text.SetLabel(
@@ -727,7 +729,7 @@ class FilesTreeView(wx.TreeCtrl):
         self.AssignImageList(self.image_list)
         self.Bind(wx.EVT_TREE_ITEM_EXPANDING, self.on_expend)
 
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.load_over_flag = False
 
         root = self.AddRoot("命根子")
@@ -746,7 +748,7 @@ class FilesTreeView(wx.TreeCtrl):
         dirs = packet["dirs"]
         files = packet["files"]
 
-        paths = normpath(root_path).split("\\")
+        paths: list = normpath(root_path).split("\\")
         paths.pop(-1) if paths[-1] == "" else None
         correct_dir = self.files_data.name_tree_get(paths)
         root_id = correct_dir.item_id
@@ -801,7 +803,7 @@ class FilesTreeView(wx.TreeCtrl):
     def _request_list_dir(self, path: str):
         packet = {"type": REQ_LIST_DIR, "path": path}
         self.load_over_flag = False
-        self.client.send_packet(packet)
+        self.api.send_packet(packet)
 
     def on_menu(self, event: wx.TreeEvent):
         item_id: wx.TreeItemId = event.GetItem()
@@ -830,7 +832,7 @@ class FilesTreeView(wx.TreeCtrl):
     def view_file(self, path: str):
         path = normpath(path)
         packet = {"type": FILE_VIEW, "path": path, "data_max_size": 1024 * 100}
-        self.client.send_packet(packet)
+        self.api.send_packet(packet)
 
     def refresh_dir(self, path: str, item_id: wx.TreeItemId):
         path = normpath(path)
@@ -839,7 +841,7 @@ class FilesTreeView(wx.TreeCtrl):
 
     def delete_path(self, path: str, item_id: wx.TreeItemId):
         packet = {"type": FILE_DELETE, "path": path}
-        self.client.send_packet(packet)
+        self.api.send_packet(packet)
         self.Delete(item_id)
 
 
@@ -951,7 +953,7 @@ class TerminalText(wx.TextCtrl):
             size=(1226, 700),
         )
         self.Bind(wx.EVT_CONTEXT_MENU, self.on_menu)
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.SetForegroundColour(wx.Colour(204, 204, 204))
         self.SetBackgroundColour(wx.Colour(14, 14, 14))
 
@@ -983,13 +985,13 @@ class TerminalText(wx.TextCtrl):
         self.PopupMenu(menu)
 
     def clear_and_send(self, event: wx.MenuEvent):
-        self.client.send_command("")
+        self.api.send_command("")
         self.Clear()
         event.Skip()
 
     def restore_shell(self, _):
         self.Clear()
-        self.client.restore_shell()
+        self.api.restore_shell()
 
 
 class TerminalInput(Panel):
@@ -1009,7 +1011,7 @@ class TerminalInput(Panel):
         self.has_focus = False
         self.normal_color = self.GetForegroundColour()
         self.gray_color = wx.Colour((76, 76, 76))
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.text.Bind(wx.EVT_SET_FOCUS, self.on_focus)
         self.text.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
         self.text.Bind(wx.EVT_KEY_DOWN, self.on_enter)
@@ -1062,7 +1064,7 @@ class TerminalInput(Panel):
         if self.text.GetValue() != "":
             self.command_history.append(self.text.GetValue())
         self.history_index = len(self.command_history)
-        self.client.send_command(self.text.GetValue())
+        self.api.send_command(self.text.GetValue())
         self.text.Clear()
 
 
@@ -1106,7 +1108,7 @@ class ActionGrid(grid.Grid):
             self.SetColSize(i, width)
         self.datas: list[TheAction] = []
         self.first_add = True
-        self.client = get_client(self)
+        self.api = get_api(self)
         self.SetDefaultCellAlignment(wx.ALIGN_CENTER, wx.ALIGN_CENTER)
 
         self.SetRowLabelSize(1)
@@ -1132,7 +1134,7 @@ class ActionGrid(grid.Grid):
         self.SetCellValue(row, 3, " ".join([end.name() for end in end_prqs]))
         the_action = TheAction(name, actions, start_prqs, end_prqs)
         self.datas.append(the_action)
-        self.client.send_packet(the_action.build_packet())
+        self.api.send_packet(the_action.build_packet())
 
 
 class StartPrqList(AddableList):
@@ -1160,7 +1162,7 @@ class EndPrqList(AddableList):
 class ActionAddDialog(wx.Frame):
     def __init__(self, parent):
         assert isinstance(parent, ActionEditor)
-        super().__init__(get_client(parent), title="动作编辑器", size=(420, 390))
+        super().__init__(get_window_name(parent, "Client"), title="动作编辑器", size=(420, 390))
         self.action_editor = parent
         self.SetFont(ft(12))
         self.sizer = wx.BoxSizer(wx.VERTICAL)
@@ -1314,6 +1316,7 @@ class Client(wx.Frame):
         self.files_list: dict[str, tuple[str, bytes]] = {}
 
         self.SetFont(font)
+        self.api = ClientAPI(self)
         self.init_ui()
         self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
         self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
@@ -1420,8 +1423,8 @@ class Client(wx.Frame):
             wx.CallAfter(self.shell_broke_tip)
         elif packet["type"] == PONG:
             wx.CallAfter(
-                self.screen_tab.screen_panel.controller.info_shower.update_delay, 
-                perf_counter() - packet["timer"]
+                self.screen_tab.screen_panel.controller.info_shower.update_delay,
+                perf_counter() - packet["timer"],
             )
 
         return True
@@ -1540,13 +1543,6 @@ class Client(wx.Frame):
             self.SetTitle(self.raw_title + " (未连接)")
         self.__connected = value
         self.packet_manager.connected = value
-
-
-def get_client(widget: wx.Window) -> Client:
-    while True:
-        widget: wx.Window = widget.GetParent()
-        if isinstance(widget, Client):
-            return widget
 
 
 if __name__ == "__main__":
