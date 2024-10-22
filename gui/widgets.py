@@ -1,11 +1,11 @@
-from os.path import abspath
-from threading import Lock
-from time import sleep
-from typing import Callable
-from win32api import GetSystemMetrics
-from win32gui import GetCursorPos
-from libs.packets import *
 import wx
+from time import sleep
+from libs.packets import *
+from threading import Lock
+from os.path import abspath
+from typing import Callable
+from win32gui import GetCursorPos
+from win32api import GetSystemMetrics
 
 font: wx.Font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
 font.SetPointSize(11)
@@ -32,6 +32,15 @@ def get_window(widget: wx.Window) -> wx.Frame:
         widget: wx.Window = widget.GetParent()
         if isinstance(widget, wx.Frame):
             return widget
+
+
+def format_size(size_in_bytes) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    index = 0
+    while size_in_bytes >= 1024 and index < len(units) - 1:
+        size_in_bytes /= 1024
+        index += 1
+    return f"{size_in_bytes:.2f} {units[index]}"
 
 
 class Panel(wx.Panel):
@@ -66,9 +75,7 @@ class LabelCombobox(Panel):
         super().__init__(parent, size=(130, 27))
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.label_ctl = wx.StaticText(self, label=label)
-        self.combobox = wx.ComboBox(
-            self, choices=[name for name, _ in choices], size=(100, 27)
-        )
+        self.combobox = wx.ComboBox(self, choices=[name for name, _ in choices], size=(100, 27))
         self.label_ctl.SetFont(font)
         sizer.Add(self.label_ctl, flag=wx.ALIGN_CENTER_VERTICAL, proportion=0)
         sizer.AddSpacer(6)
@@ -174,9 +181,7 @@ class ItemChoiceDialog(wx.Dialog):
         self.bottom_sizer.Add(self.ok_btn, proportion=0)
         self.bottom_sizer.AddSpacer(6)
         self.bottom_sizer.Add(self.cancel_btn, proportion=0)
-        self.sizer.Add(
-            self.bottom_sizer, flag=wx.EXPAND | wx.ALL, proportion=0, border=6
-        )
+        self.sizer.Add(self.bottom_sizer, flag=wx.EXPAND | wx.ALL, proportion=0, border=6)
         self.SetSizer(self.sizer)
         self.SetIcon(wx.Icon(abspath("assets/select.ico"), wx.BITMAP_TYPE_ICO))
         for name, _ in choices:
@@ -206,18 +211,12 @@ class InputSlider(wx.Panel):
     ):
         super().__init__(parent=parent, size=(1500, 31))
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.slider = wx.Slider(
-            self, value=value, minValue=_from, maxValue=to, size=(790, 31)
-        )
+        self.slider = wx.Slider(self, value=value, minValue=_from, maxValue=to, size=(790, 31))
         self.inputter = wx.TextCtrl(self, value=str(value), size=(60, 31))
         self.sizer.AddSpacer(5)
-        self.sizer.Add(
-            self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1
-        )
+        self.sizer.Add(self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1)
         self.sizer.AddSpacer(5)
-        self.sizer.Add(
-            self.inputter, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0
-        )
+        self.sizer.Add(self.inputter, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0)
 
         self.slider.Bind(wx.EVT_SLIDER, self.on_slider)
         self.inputter.Bind(wx.EVT_TEXT, self.on_edit)
@@ -262,10 +261,7 @@ class InputSlider(wx.Panel):
 
     def on_enter(self, event: wx.KeyEvent):
         self.SetFocus()
-        if (
-            event.GetKeyCode() == wx.WXK_RETURN
-            or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER
-        ):
+        if event.GetKeyCode() == wx.WXK_RETURN or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER:
             self.on_focus_out()
         event.Skip()
 
