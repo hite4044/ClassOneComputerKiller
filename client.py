@@ -28,6 +28,7 @@ DEFAULT_FILE_BLOCK_SIZE = 1024 * 100
 DEFAULT_RECONNECT_TIME = 2
 DEFAULT_CONNECT_TIMEOUT = 2
 
+
 # 加载配置文件
 def load_config() -> None:
     global config_data
@@ -57,6 +58,7 @@ def load_config() -> None:
     except OSError as e:
         print(f"Error saving config: {e}")
 
+
 # 加载配置
 load_config()
 
@@ -65,8 +67,10 @@ FILE_BLOCK = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
 reconnect_time = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
 connect_timeout = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
 
+
 class ClientStopped(BaseException):
     pass
+
 
 class Client:
     def __init__(self, config: dict) -> None:
@@ -285,7 +289,11 @@ class Client:
             except OSError:
                 self.send_packet({"type": SHELL_BROKEN})
         elif packet["type"] == PING:
-                self.send_packet({"type": "pong", "timer": packet["timer"]}, priority=Priority.HIGHEST)
+            self.send_packet({"type": "pong", "timer": packet["timer"]}, priority=Priority.HIGHEST)
+        elif packet["type"] == STATE_INFO:
+            self.sending_screen = packet["video_mode"]
+            self.screen_fps = packet["monitor_fps"]
+            self.screen_quality = packet["video_quality"]
         return True
 
     def file_view_thread(self, packet: Packet):
@@ -311,9 +319,7 @@ class Client:
         cookie = hex(int.from_bytes(random.randbytes(8), "big"))[2:]
         packet = {"type": FILE_VIEW_CREATE, "path": path, "cookie": cookie}
         self.send_packet(packet)
-        for block in [
-            data[i : i + FILE_BLOCK] for i in range(0, len(data), FILE_BLOCK)
-        ]:
+        for block in [data[i : i + FILE_BLOCK] for i in range(0, len(data), FILE_BLOCK)]:
             packet = {
                 "type": FILE_VIEW_DATA,
                 "path": path,

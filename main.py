@@ -122,7 +122,9 @@ class ClientListWindow(wx.Frame):
             self.clients[addr] = client
 
     def add_client(self, parent, connection: socket.socket, address, uuid: bytes):
+        timer = perf_counter()
         client = Client(parent, connection, address, uuid)
+        print(f"客户端初始化耗时 {ms(timer)} ms")
         self.clients[address] = client
 
 

