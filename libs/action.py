@@ -22,10 +22,10 @@ class EndPrqKind:
 
 
 class ParamType:
-    INT = 0
-    STRING = 1
-    FLOAT = 2
-    BOOL = 3
+    INT = int
+    STRING = str
+    FLOAT = float
+    BOOL = bool
 
 
 class ActionParam:
@@ -40,7 +40,7 @@ class ActionParam:
         return None
 
     def parse_string(self, value: str) -> Any:
-        return
+        return self.type(value)
 
 
 class IntParam(ActionParam):
@@ -57,9 +57,6 @@ class IntParam(ActionParam):
         if self.custom["min"] is not None and num < self.custom["min"]:
             return f"请输入大于等于{self.custom['min']}的整数"
 
-    def parse_string(self, value: str) -> int:
-        return int(value)
-
 
 class FloatParam(ActionParam):
     def __init__(self, label: str, default: float):
@@ -74,9 +71,6 @@ class FloatParam(ActionParam):
         except TypeError:
             return "请输入正确的浮点数"
 
-    def parse_string(self, value: str) -> float:
-        return float(value)
-
 
 class BoolParam(ActionParam):
     def __init__(self, label: str, default: bool):
@@ -85,16 +79,10 @@ class BoolParam(ActionParam):
     def valid(self, value: bool) -> True:
         return True
 
-    def parse_string(self, value: bool) -> bool:
-        return bool(value)
-
 
 class StringParam(ActionParam):
     def __init__(self, label: str, default: str):
         super().__init__(label, ParamType.STRING, default)
-
-    def parse_string(self, value: str) -> str:
-        return value
 
 
 class StartPrq:
