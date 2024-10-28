@@ -71,7 +71,7 @@ class LabelEntry(Panel):
 
 
 class LabelCombobox(Panel):
-    def __init__(self, parent, label: str, choices: list[tuple[str, str]] = []):
+    def __init__(self, parent, label: str, choices: list[tuple[str, Any]] = []):
         super().__init__(parent, size=(130, 27))
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.label_ctl = wx.StaticText(self, label=label)
@@ -86,16 +86,16 @@ class LabelCombobox(Panel):
 
         self.datas = choices
 
-    def set_choices(self, choices: list[tuple[str, str]]):
+    def set_choices(self, choices: list[tuple[str, Any]]):
         self.combobox.Clear()
         self.combobox.AppendItems([name for name, _ in choices])
         self.datas = choices
 
-    def add_choice(self, name: str, data: str):
+    def add_choice(self, name: str, data: Any):
         self.combobox.Append(name)
         self.datas.append((name, data))
 
-    def get_data(self) -> str | None:
+    def get_data(self) -> Any | None:
         select = self.combobox.GetValue()
         for name, data in self.datas:
             if name == select:

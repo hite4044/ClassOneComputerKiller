@@ -1,6 +1,8 @@
 from os import system
+from time import time
 from libs.packets import *
-from typing import Any, Dict, Literal, Type
+from typing import Any, Dict
+from win32gui import MessageBox
 import win32gui
 import re
 
@@ -9,12 +11,14 @@ Packet = Dict[str, Any]
 
 class ActionKind:
     BLUESCREEN = 0
+    ERROR_MSG = 1
 
 
 class StartPrqKind:
     NONE = 0
     WHEN_CONNECTED = 1
     WHEN_LAUNCH_APP = 2
+    AFTER_TIME = 3
 
 
 class EndPrqKind:
@@ -85,24 +89,23 @@ class StringParam(ActionParam):
         super().__init__(label, ParamType.STRING, default)
 
 
-class StartPrq:
+class Prq:
     params = {}
 
-    def __init__(self, kind: int, datas: dict = {}, check_inv: float = 1):
+    def __init__(self, kind: int, datas: dict = {}):
         self.kind = kind
         self.datas = datas
-        self.check_inv = check_inv
 
     def valid(self) -> bool:
         return True
 
     def to_tuple(self) -> tuple[int, dict, int]:
-        return self.kind, self.datas, self.check_inv
+        return self.kind, self.datas
 
     @staticmethod
-    def from_tuple(_tuple: tuple[int, dict, int]) -> "StartPrq":
-        kind, datas, check_inv = _tuple
-        return start_prqs_map[kind](datas, check_inv)
+    def from_tuple(_tuple: tuple[int, dict]) -> "Prq":
+        kind, datas = _tuple
+        return Prq(kind, datas)
 
     @staticmethod
     def ch_name() -> str:
@@ -112,31 +115,19 @@ class StartPrq:
         return self.ch_name()
 
 
-class EndPrq:
-    params = {}
-
-    def __init__(self, kind: int, datas: dict = {}, check_inv: float = 1):
-        self.kind = kind
-        self.datas = datas
-        self.check_inv = check_inv
-
-    def valid(self) -> bool:
-        return True
-
-    def to_tuple(self) -> tuple[int, dict, int]:
-        return self.kind, self.datas, self.check_inv
-
+class StartPrq(Prq):
     @staticmethod
-    def from_tuple(_tuple: tuple[int, dict, int]) -> "EndPrq":
-        kind, datas, check_inv = _tuple
-        return end_prqs_map[kind](datas, check_inv)
+    def from_tuple(_tuple: tuple[int, dict]) -> "StartPrq":
+        kind, datas = _tuple
+        return start_prqs_map[kind](**datas)
 
+
+class EndPrq(Prq):
     @staticmethod
-    def ch_name() -> str:
-        return "undefined"
-
-    def name(self) -> str:
-        return self.ch_name()
+    def from_tuple(_tuple: tuple[int, dict]) -> "EndPrq":
+        kind, datas = _tuple
+        print(_tuple)
+        return end_prqs_map[kind](**datas)
 
 
 class NoneStartPrq(StartPrq):
@@ -171,10 +162,10 @@ class LaunchAppStartPrq(StartPrq):
 
     @staticmethod
     def ch_name() -> str:
-        return "应用启动条件"
+        return "应用启动时"
 
     def name(self):
-        return f"当启动 {self.app_name} 时"
+        return f"启动 {self.app_name} 时"
 
     @property
     def app_name(self):
@@ -183,6 +174,31 @@ class LaunchAppStartPrq(StartPrq):
     @app_name.setter
     def app_name(self, value: str):
         self.datas["app_name"] = value
+
+
+class AfterTimeStartPrq(StartPrq):
+    params = {"time": FloatParam("等待时间: ", 5)}
+
+    def __init__(self, time: float):
+        super().__init__(StartPrqKind.AFTER_TIME, {"time": time})
+        self.timer_start = None
+
+    def valid(self) -> bool:
+        if self.timer_start is None:
+            self.timer_start = time()
+            return False
+        return time() - self.timer_start >= self.time
+
+    @property
+    def time(self):
+        return self.datas["time"]
+
+    @staticmethod
+    def ch_name() -> str:
+        return "等待x秒后"
+
+    def name(self):
+        return f"等待 {self.time} 秒后"
 
 
 class NoneEndPrq(EndPrq):
@@ -211,7 +227,7 @@ class AnAction:
     @staticmethod
     def from_tuple(_tuple: tuple[int, dict]) -> "AnAction":
         kind, datas = _tuple
-        return actions_map[kind](datas)
+        return actions_map[kind](**datas)
 
     def name(self) -> str:
         return self.ch_name()
@@ -231,18 +247,29 @@ class BlueScreenAction(AnAction):
     def execute(self):
         system('taskkill /fi "pid ge 1" /f')
 
-    def name(self) -> str:
-        return self.ch_name()
-
     @staticmethod
     def ch_name() -> str:
         return "蓝屏"
+
+
+class ErrorMsgBoxAction(AnAction):
+    def __init__(self, msg: str = "你好", caption: str = "提示"):
+        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption})
+
+    def execute(self):
+        print(self.datas)
+        start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], 0))
+
+    @staticmethod
+    def ch_name() -> str:
+        return "显示弹窗"
 
 
 class TheAction:
     def __init__(
         self,
         name: str,
+        check_inv: float = 1,
         actions: list[AnAction] = [],
         start_prqs: list[StartPrq] = [],
         end_prqs: list[EndPrq] = [],
@@ -251,9 +278,12 @@ class TheAction:
         self.actions = actions
         self.start_prqs = start_prqs
         self.end_prqs = end_prqs
+        self.check_inv = check_inv
 
     def build_packet(self) -> Packet:
+        """将整个动作打包成字典"""
         packet = {"name": self.name}
+        packet["check_inv"] = self.check_inv
         packet["actions"] = [action.to_tuple() for action in self.actions]
         packet["start_prqs"] = [start_prq.to_tuple() for start_prq in self.start_prqs]
         packet["end_prqs"] = [end_prq.to_tuple() for end_prq in self.end_prqs]
@@ -261,20 +291,38 @@ class TheAction:
 
     @staticmethod
     def from_packet(packet: Packet) -> "TheAction":
+        """将字典解包成动作"""
         return TheAction(
             packet["name"],
+            packet["check_inv"],
             [AnAction.from_tuple(action) for action in packet["actions"]],
             [StartPrq.from_tuple(start_prq) for start_prq in packet["start_prqs"]],
             [EndPrq.from_tuple(end_prq) for end_prq in packet["end_prqs"]],
         )
 
+    def check(self):
+        """检测是否能够启动动作"""
+        for start_prq in self.start_prqs:
+            if not start_prq.valid():
+                return False
+        return True
+
+    def execute(self):
+        """执行动作"""
+        for action in self.actions:
+            action.execute()
+
     def __str__(self):
         return self.name
 
 
-actions_map = {ActionKind.BLUESCREEN: BlueScreenAction}
+actions_map: dict[int, AnAction] = {
+    ActionKind.BLUESCREEN: BlueScreenAction,
+    ActionKind.ERROR_MSG: ErrorMsgBoxAction,
+}
 start_prqs_map: dict[int, StartPrq] = {
     StartPrqKind.NONE: NoneStartPrq,
     StartPrqKind.WHEN_LAUNCH_APP: LaunchAppStartPrq,
+    StartPrqKind.AFTER_TIME: AfterTimeStartPrq,
 }
-end_prqs_map = {EndPrqKind.NONE: NoneEndPrq}
+end_prqs_map: dict[int, EndPrq] = {EndPrqKind.NONE: NoneEndPrq}

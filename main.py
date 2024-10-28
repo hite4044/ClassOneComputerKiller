@@ -316,7 +316,7 @@ class Client(wx.Frame):
             "type": STATE_INFO,
             "video_mode": self.sending_screen,
             "monitor_fps": self.screen_tab.screen_panel.controller.screen_fps_setter.input_slider.get_value(),
-            "monitor_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
+            "video_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
         }
         self.send_packet(packet)
 

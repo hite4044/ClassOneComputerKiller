@@ -3,10 +3,11 @@ import random
 import _ctypes
 import win32api
 import win32con
+import threading
 from PIL import Image
 from time import time
 from io import BytesIO
-from typing import Optional
+from typing import Callable, Optional
 from os import walk, remove
 from pynput import keyboard
 from msvcrt import get_osfhandle
@@ -59,6 +60,10 @@ def load_config() -> None:
         print(f"Error saving config: {e}")
 
 
+def random_hex(length: int) -> str:
+    return hex(int.from_bytes(random.randbytes(length), "big"))[2:]
+
+
 # 加载配置
 load_config()
 
@@ -70,6 +75,72 @@ connect_timeout = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
 
 class ClientStopped(BaseException):
     pass
+
+
+class TimerLoop:
+    def __init__(self, interval: float, checker: Callable[[], bool], callback: Callable[[], None]):
+        self.interval = interval
+        self.checker = checker
+        self.callback = callback
+        self.ran = False
+        self.running = False
+        self.timer = None
+        self.lock = threading.Lock()
+
+    def start(self):
+        with self.lock:
+            if not self.running:
+                self.timer = threading.Timer(self.interval, self.checking)
+                self.timer.start()
+                self.running = True
+
+    def checking(self):
+        with self.lock:
+            if self.checker():
+                if not self.ran:
+                    self.callback()
+                    self.ran = True
+            else:
+                self.ran = False
+            if self.running:
+                self.timer = threading.Timer(self.interval, self.checking)
+                self.timer.start()
+
+    def pause(self, pause: bool = True):
+        with self.lock:
+            if pause and self.running:
+                self.timer.cancel()
+                self.running = False
+            elif not pause and not self.running:
+                self.timer = threading.Timer(self.interval, self.checking)
+                self.timer.start()
+                self.running = True
+
+    def stop(self):
+        with self.lock:
+            self.timer.cancel()
+            self.running = False
+
+
+class ActionManager:
+    """实时在一个线程里按不同时间间隔运行不同的函数"""
+    def __init__(self):
+        self.actions: dict[str, tuple[TheAction, TimerLoop]] = {}
+
+    def add_action(self, action: TheAction) -> str:
+        """添加一个定时任务"""
+        print(action.build_packet())
+        uuid = random_hex(8)
+        timer_loop = TimerLoop(action.check_inv, action.check, action.execute)
+        timer_loop.start()
+        self.actions[uuid] = (action, timer_loop)
+        return uuid
+    
+    def stop2clear(self):
+        """停止所有定时任务并清空"""
+        for _, timer in self.actions.values():
+            timer.stop()
+        self.actions.clear()
 
 
 class Client:
@@ -103,6 +174,7 @@ class Client:
         self.shell: Popen = None
 
         self.packet_manager = PacketManager(self.connected)
+        self.action_manager = ActionManager()
 
     def log(self, *values: object):
         text = " ".join(map(str, values))
@@ -294,6 +366,8 @@ class Client:
             self.sending_screen = packet["video_mode"]
             self.screen_fps = packet["monitor_fps"]
             self.screen_quality = packet["video_quality"]
+        elif packet["type"] == ACTION_ADD:
+            self.action_manager.add_action(TheAction.from_packet(packet))
         return True
 
     def file_view_thread(self, packet: Packet):
@@ -424,6 +498,7 @@ class Client:
         self.pre_scaled = True  # 是否预缩放
         self.screen_size: tuple[int, int] = (960, 540)  # 预缩放提供的大小
         self.key_listener = keyboard.Listener(on_press=self.on_key_press)
+        self.action_manager.stop2clear()
         self.shell_thread_running = False
         if getattr(self, "shell", None):
             self.shell.terminate()
@@ -503,4 +578,4 @@ class Client:
 if __name__ == "__main__":
     load_config()
     client = Client(config_data)
-    client.run_infinitely()
+    client.start()

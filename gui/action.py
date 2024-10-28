@@ -28,8 +28,8 @@ class ActionEditDialog(wx.Frame):
         self.ok_btn = wx.Button(self, label="确定")
         self.cancel_btn = wx.Button(self, label="取消")
 
-        for action_kind, action_type in actions_map.items():
-            self.actions_chooser.add_choice(action_type.ch_name(), str(action_kind))
+        for _, action_type in actions_map.items():
+            self.actions_chooser.add_choice(action_type.ch_name(), action_type)
         self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
         self.cancel_btn.Bind(wx.EVT_BUTTON, self.on_cancel)
         self.name_inputter.label_ctl.SetFont(ft(13))
@@ -53,18 +53,28 @@ class ActionEditDialog(wx.Frame):
         self.Show()
 
     def on_ok(self, _):
+        msg = self.callback_action()
+        if msg:
+            MessageBox(self.Handle, msg, "错误", wx.OK | wx.ICON_ERROR)
+        else:
+            self.Close()
+
+    def callback_action(self) -> None | str:
         name = self.name_inputter.text.GetValue()
         start_prqs = self.start_prqs.get_items()
         end_prqs = self.end_prqs.get_items()
         if start_prqs == []:
-            start_prqs.append(NoneStartPrq())
+            return "请选择至少一个开始条件"
         if end_prqs == []:
             end_prqs.append(NoneEndPrq())
-        action = BlueScreenAction()
-        actions = [action]
-        the_action = TheAction(name, actions, start_prqs, end_prqs)
+        action_type = self.actions_chooser.get_data()
+        if action_type is None:
+            return "请选择要执行的操作"
+        action: AnAction = action_type()
+        print(action, action_type, action.datas)
+        the_action = TheAction(name, 1, [action], start_prqs, end_prqs)
         self.callback(the_action)
-        self.Close()
+        return None
 
     def on_cancel(self, _):
         self.Close()
@@ -224,9 +234,6 @@ class ActionGrid(grid.Grid):
         self.SetCellValue(row, 2, " ".join([action.name() for action in the_action.actions]))
         self.SetCellValue(row, 3, " ".join([end.name() for end in the_action.end_prqs]))
         self.datas.append(the_action)
-        pak = the_action.build_packet()
-        pak["type"] = ACTION_ADD
-        self.api.send_packet(pak)
         return the_action
 
 
