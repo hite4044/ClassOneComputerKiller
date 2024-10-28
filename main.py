@@ -274,6 +274,7 @@ class Client(wx.Frame):
         self.init_ui()
         self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
         self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
+        start_and_return(self.state_init, name="StateInit")
         self.Show()
         self.SetPosition(wx.Point(15, 110))
 
