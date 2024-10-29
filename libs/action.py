@@ -30,6 +30,7 @@ class ParamType:
     STRING = str
     FLOAT = float
     BOOL = bool
+    CHOICE = str
 
 
 class ActionParam:
@@ -87,6 +88,15 @@ class BoolParam(ActionParam):
 class StringParam(ActionParam):
     def __init__(self, label: str, default: str):
         super().__init__(label, ParamType.STRING, default)
+
+
+class ChoiceParam(ActionParam):
+    def __init__(self, label: str, default: str, choices: dict[str, Any]):
+        super().__init__(label, ParamType.CHOICE, default)
+        self.choices = choices
+
+    def parse_string(self, value: str) -> Any:
+        return self.choices[value]
 
 
 class Prq:
@@ -214,6 +224,8 @@ class NoneEndPrq(EndPrq):
 
 
 class AnAction:
+    params = {}
+
     def __init__(self, kind: int, datas: dict = {}) -> None:
         self.kind = kind
         self.datas = datas
@@ -253,12 +265,21 @@ class BlueScreenAction(AnAction):
 
 
 class ErrorMsgBoxAction(AnAction):
-    def __init__(self, msg: str = "你好", caption: str = "提示"):
-        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption})
+    from win32con import MB_ICONERROR, MB_ICONWARNING, MB_ICONINFORMATION
+
+    params = {
+        "msg": StringParam("提示内容: ", "你好"),
+        "caption": StringParam("标题: ", "提示"),
+        "flags": ChoiceParam(
+            "图标", "警告", {"警告": MB_ICONWARNING, "错误": MB_ICONERROR, "信息": MB_ICONINFORMATION}
+        ),
+    }
+
+    def __init__(self, msg: str = "你好", caption: str = "提示", flags: int = 0):
+        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption, "flags": flags})
 
     def execute(self):
-        print(self.datas)
-        start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], 0))
+        start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], self.datas["flags"]))
 
     @staticmethod
     def ch_name() -> str:

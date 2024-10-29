@@ -61,20 +61,26 @@ class ActionEditDialog(wx.Frame):
 
     def callback_action(self) -> None | str:
         name = self.name_inputter.text.GetValue()
+        
         start_prqs = self.start_prqs.get_items()
         end_prqs = self.end_prqs.get_items()
         if start_prqs == []:
             return "请选择至少一个开始条件"
         if end_prqs == []:
             end_prqs.append(NoneEndPrq())
-        action_type = self.actions_chooser.get_data()
+        
+        action_type: AnAction = self.actions_chooser.get_data()
         if action_type is None:
             return "请选择要执行的操作"
-        action: AnAction = action_type()
-        print(action, action_type, action.datas)
-        the_action = TheAction(name, 1, [action], start_prqs, end_prqs)
-        self.callback(the_action)
+        if action_type.params:
+            DataInputDialog(self, "输入动作参数", action_type.params, lambda datas: self.action_params_cbk(datas, (name, start_prqs, end_prqs, action_type)))
+        else:
+            self.action_params_cbk({}, (name, start_prqs, end_prqs, action_type))
         return None
+    
+    def action_params_cbk(self, datas: dict[str, Any], flash: tuple[str, list[StartPrq], list[EndPrq], AnAction]):
+        action: AnAction = flash[3](**datas)
+        self.callback(TheAction(flash[0], 1, [action], flash[1], flash[2]))
 
     def on_cancel(self, _):
         self.Close()
@@ -91,14 +97,19 @@ class DataInputter(wx.Panel):
         self.sizer.Add(self.label, proportion=0)
         self.sizer.AddSpacer(6)
         self.normal_color = None
-        if param.type != ParamType.BOOL:
+        if param.type in [ParamType.FLOAT, ParamType.INT, ParamType.STRING]:
             self.inputter = wx.TextCtrl(self)
             self.inputter.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
             self.inputter.Bind(wx.EVT_SET_FOCUS, self.on_focus_in)
             self.normal_color = self.inputter.GetBackgroundColour()
             self.inputter.SetValue(str(param.default))
-        else:
+        elif param.type == ParamType.BOOL:
             self.inputter = wx.CheckBox(self)
+            self.inputter.SetValue(param.default)
+        elif param.type == ParamType.CHOICE:
+            assert isinstance(param, ChoiceParam)
+            self.inputter = wx.ComboBox(self, style=wx.CB_READONLY)
+            self.inputter.SetItems([name for name,_ in param.choices])
             self.inputter.SetValue(param.default)
         self.inputter.SetFont(ft(13))
 
