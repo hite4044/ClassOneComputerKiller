@@ -83,6 +83,7 @@ class LabelCombobox(Panel):
         sizer.AddSpacer(6)
         sizer.Add(self.combobox, wx.EXPAND)
         self.SetSizer(sizer)
+        self.combobox.Clear()  # 奇怪的Bug: 如果不清空就会导致选项不断叠加
 
         self.datas = choices
 

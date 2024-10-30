@@ -578,4 +578,4 @@ class Client:
 if __name__ == "__main__":
     load_config()
     client = Client(config_data)
-    client.start()
+    client.run_infinitely()

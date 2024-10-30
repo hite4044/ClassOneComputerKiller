@@ -61,24 +61,31 @@ class ActionEditDialog(wx.Frame):
 
     def callback_action(self) -> None | str:
         name = self.name_inputter.text.GetValue()
-        
+
         start_prqs = self.start_prqs.get_items()
         end_prqs = self.end_prqs.get_items()
         if start_prqs == []:
             return "请选择至少一个开始条件"
         if end_prqs == []:
             end_prqs.append(NoneEndPrq())
-        
+
         action_type: AnAction = self.actions_chooser.get_data()
         if action_type is None:
             return "请选择要执行的操作"
         if action_type.params:
-            DataInputDialog(self, "输入动作参数", action_type.params, lambda datas: self.action_params_cbk(datas, (name, start_prqs, end_prqs, action_type)))
+            DataInputDialog(
+                self,
+                "输入动作参数",
+                action_type.params,
+                lambda datas: self.action_params_cbk(datas, (name, start_prqs, end_prqs, action_type)),
+            )
         else:
             self.action_params_cbk({}, (name, start_prqs, end_prqs, action_type))
         return None
-    
-    def action_params_cbk(self, datas: dict[str, Any], flash: tuple[str, list[StartPrq], list[EndPrq], AnAction]):
+
+    def action_params_cbk(
+        self, datas: dict[str, Any], flash: tuple[str, list[StartPrq], list[EndPrq], AnAction]
+    ):
         action: AnAction = flash[3](**datas)
         self.callback(TheAction(flash[0], 1, [action], flash[1], flash[2]))
 
@@ -99,8 +106,6 @@ class DataInputter(wx.Panel):
         self.normal_color = None
         if param.type in [ParamType.FLOAT, ParamType.INT, ParamType.STRING]:
             self.inputter = wx.TextCtrl(self)
-            self.inputter.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
-            self.inputter.Bind(wx.EVT_SET_FOCUS, self.on_focus_in)
             self.normal_color = self.inputter.GetBackgroundColour()
             self.inputter.SetValue(str(param.default))
         elif param.type == ParamType.BOOL:
@@ -109,7 +114,7 @@ class DataInputter(wx.Panel):
         elif param.type == ParamType.CHOICE:
             assert isinstance(param, ChoiceParam)
             self.inputter = wx.ComboBox(self, style=wx.CB_READONLY)
-            self.inputter.SetItems([name for name,_ in param.choices])
+            self.inputter.SetItems([name for name, _ in param.choices.items()])
             self.inputter.SetValue(param.default)
         self.inputter.SetFont(ft(13))
 
@@ -124,16 +129,6 @@ class DataInputter(wx.Panel):
             return self.param.parse_string(self.inputter.GetValue())
         else:
             return None
-
-    def on_focus_out(self, _):
-        if self.param.valid(self.inputter.GetValue()) is None:
-            self.inputter.SetBackgroundColour(wx.GREEN)
-        else:
-            self.inputter.SetBackgroundColour(wx.RED)
-
-    def on_focus_in(self, event: wx.FocusEvent):
-        self.inputter.SetBackgroundColour(self.normal_color)
-        event.Skip()
 
 
 class DataInputDialog(wx.Dialog):
@@ -180,10 +175,11 @@ class DataInputDialog(wx.Dialog):
         for name, inputter in self.inputters.items():
             data[name] = inputter.get_data()
         if None in data.values():
+            print(data)
             wx.MessageBox("请检查输入", "错误", wx.OK | wx.ICON_ERROR)
         else:
             self.callback(data)
-        self.Close()
+            self.Close()
 
 
 class ActionGrid(grid.Grid):

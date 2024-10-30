@@ -31,7 +31,7 @@ class ParamType:
     STRING = str
     FLOAT = float
     BOOL = bool
-    CHOICE = str
+    CHOICE = list[str]
 
 
 class ActionParam:
@@ -81,9 +81,9 @@ class FloatParam(ActionParam):
 class BoolParam(ActionParam):
     def __init__(self, label: str, default: bool):
         super().__init__(label, ParamType.BOOL, default)
-
-    def valid(self, value: bool) -> True:
-        return True
+    
+    def parse_string(self, value: bool) -> Any:
+        return value
 
 
 class StringParam(ActionParam):
@@ -276,37 +276,48 @@ class ErrorMsgBoxAction(AnAction):
         "flags": ChoiceParam(
             "图标: ", "警告", {"警告": MB_ICONWARNING, "错误": MB_ICONERROR, "信息": MB_ICONINFORMATION}
         ),
+        "wait": BoolParam("等待关闭: ", True)
     }
 
-    def __init__(self, msg: str = "你好", caption: str = "提示", flags: int = 0):
-        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption, "flags": flags})
+    def __init__(self, msg: str, caption: str, flags: int, wait: bool):
+        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption, "flags": flags, "wait": wait})
 
     def execute(self):
-        start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], self.datas["flags"]))
+        if self.datas["wait"]:
+            MessageBox(0, self.datas["msg"], self.datas["caption"], self.datas["flags"])
+        else:
+            start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], self.datas["flags"]))
 
     @staticmethod
     def ch_name() -> str:
         return "显示弹窗"
+    
+    def name(self):
+        return f"显示弹窗: {self.datas['msg']}"
 
 
 class ExecuteCommandAction(AnAction):
     """执行命令"""
     params = {
         "command": StringParam("命令: ", "calc.exe"),
+        "wait": BoolParam("等待执行完毕: ", True)
     }
 
-    def __init__(self, command: str = "calc.exe"):
-        super().__init__(ActionKind.EXECUTE_COMMAND, {"command": command})
+    def __init__(self, command: str, wait: bool):
+        super().__init__(ActionKind.EXECUTE_COMMAND, {"command": command, "wait": wait})
 
     def execute(self):
-        start_and_return(system, (self.datas["command"],))
+        if self.datas["wait"]:
+            system(self.datas["command"])
+        else:
+            start_and_return(system, (self.datas["command"],))
 
     @staticmethod
     def ch_name() -> str:
         return "执行命令"
 
     def name(self) -> str:
-        return f"执行命令: {self.command}"
+        return f"执行命令: {self.datas['command']}"
 
 
 class TheAction:
