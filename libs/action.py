@@ -12,6 +12,7 @@ Packet = Dict[str, Any]
 class ActionKind:
     BLUESCREEN = 0
     ERROR_MSG = 1
+    EXECUTE_COMMAND = 2
 
 
 class StartPrqKind:
@@ -253,6 +254,7 @@ class AnAction:
 
 
 class BlueScreenAction(AnAction):
+    """蓝屏"""
     def __init__(self):
         super().__init__(ActionKind.BLUESCREEN)
 
@@ -265,13 +267,14 @@ class BlueScreenAction(AnAction):
 
 
 class ErrorMsgBoxAction(AnAction):
+    """显示弹窗"""
     from win32con import MB_ICONERROR, MB_ICONWARNING, MB_ICONINFORMATION
 
     params = {
+        "caption": StringParam("标题: ", "警告"),
         "msg": StringParam("提示内容: ", "你好"),
-        "caption": StringParam("标题: ", "提示"),
         "flags": ChoiceParam(
-            "图标", "警告", {"警告": MB_ICONWARNING, "错误": MB_ICONERROR, "信息": MB_ICONINFORMATION}
+            "图标: ", "警告", {"警告": MB_ICONWARNING, "错误": MB_ICONERROR, "信息": MB_ICONINFORMATION}
         ),
     }
 
@@ -284,6 +287,26 @@ class ErrorMsgBoxAction(AnAction):
     @staticmethod
     def ch_name() -> str:
         return "显示弹窗"
+
+
+class ExecuteCommandAction(AnAction):
+    """执行命令"""
+    params = {
+        "command": StringParam("命令: ", "calc.exe"),
+    }
+
+    def __init__(self, command: str = "calc.exe"):
+        super().__init__(ActionKind.EXECUTE_COMMAND, {"command": command})
+
+    def execute(self):
+        start_and_return(system, (self.datas["command"],))
+
+    @staticmethod
+    def ch_name() -> str:
+        return "执行命令"
+
+    def name(self) -> str:
+        return f"执行命令: {self.command}"
 
 
 class TheAction:
@@ -340,6 +363,7 @@ class TheAction:
 actions_map: dict[int, AnAction] = {
     ActionKind.BLUESCREEN: BlueScreenAction,
     ActionKind.ERROR_MSG: ErrorMsgBoxAction,
+    ActionKind.EXECUTE_COMMAND: ExecuteCommandAction,
 }
 start_prqs_map: dict[int, StartPrq] = {
     StartPrqKind.NONE: NoneStartPrq,
