@@ -140,6 +140,7 @@ class DataInputDialog(wx.Dialog):
         callback: Callable[[dict[str, Any]], None],
     ):
         super().__init__(get_window(parent), title=title, size=(420, 390))
+        self.SetFont(font)
         self.callback = callback
 
         self.params = params
@@ -149,7 +150,7 @@ class DataInputDialog(wx.Dialog):
         self.ok_btn = wx.Button(self, label="确定")
         self.cancel_btn = wx.Button(self, label="取消")
         self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
-        self.cancel_btn.Bind(wx.EVT_BUTTON, lambda: self.Close())
+        self.cancel_btn.Bind(wx.EVT_BUTTON, lambda _: self.Close())
         bottom_bar = wx.BoxSizer(wx.HORIZONTAL)
 
         container_sizer = wx.BoxSizer(wx.VERTICAL)

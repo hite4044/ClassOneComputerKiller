@@ -186,6 +186,7 @@ class ItemChoiceDialog(wx.Dialog):
         self.cancel_btn = wx.Button(self, label="取消")
 
         self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
+        self.listbox.Bind(wx.EVT_LISTBOX_DCLICK, self.on_ok)
         self.cancel_btn.Bind(wx.EVT_BUTTON, lambda _: self.Close())
         self.listbox.SetFont(ft(12))
         self.ok_btn.SetFont(ft(12))
