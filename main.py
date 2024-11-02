@@ -480,7 +480,7 @@ class Client(wx.Frame):
     ) -> None:
         if packet["type"] != PING:
             print(f"发送数据包: {packet_str(packet)}")
-        self.packet_manager.send_packet(packet, loss_enable, priority)
+        return self.packet_manager.send_packet(packet, loss_enable, priority)
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
         return self.packet_manager.recv_packet()

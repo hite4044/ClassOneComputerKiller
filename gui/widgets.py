@@ -34,13 +34,13 @@ def get_window(widget: wx.Window) -> wx.Frame:
             return widget
 
 
-def format_size(size_in_bytes) -> str:
+def format_size(size_in_bytes: float, retaining: int = 2) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     index = 0
     while size_in_bytes >= 1024 and index < len(units) - 1:
         size_in_bytes /= 1024
         index += 1
-    return f"{size_in_bytes:.2f} {units[index]}"
+    return f"{round(size_in_bytes, retaining)} {units[index]}"
 
 
 class Panel(wx.Panel):

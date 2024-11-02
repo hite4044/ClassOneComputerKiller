@@ -147,8 +147,9 @@ class PacketManager:
     def send_packet(
         self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER
     ) -> None:
-        self.packet_stack[priority].append((pack(packet), loss_enable))
-        # print("加入数据包队列:", packet["type"])
+        packet_data = pack(packet)
+        self.packet_stack[priority].append((packet_data, loss_enable))
+        return len(packet_data), packet_data
 
     def recv_length(self, length) -> bytes:
         data = b""
