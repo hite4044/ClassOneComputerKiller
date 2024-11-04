@@ -107,7 +107,10 @@ class ClientListWindow(wx.Frame):
         print(f"已在 {SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]} 上启动监听")
         while True:
             conn, addr = sock.accept()
-            uuid = conn.recv(8)
+            try:
+                uuid = conn.recv(8)
+            except ConnectionResetError:
+                continue
             print("客户端UUID:", hex(int.from_bytes(uuid, "big")))
             for addr, client in self.clients.items():
                 assert isinstance(client, Client)

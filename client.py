@@ -22,17 +22,22 @@ from libs.action import *
 
 # 全局变量（默认值）
 config_data = {}
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 10616
-DEFAULT_UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 自动生成UUID
-DEFAULT_FILE_BLOCK_SIZE = 1024 * 100
-DEFAULT_RECONNECT_TIME = 2
-DEFAULT_CONNECT_TIMEOUT = 2
+ERROR_DEBUG = False
+
+
+class Default:
+    HOST = "127.0.0.1"
+    PORT = 10616
+    UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 自动生成UUID
+    FILE_BLOCK_SIZE = 1024 * 100
+    RECONNECT_TIME = 2
+    CONNECT_TIMEOUT = 2
+    HOST_CHANGED = None
 
 
 # 加载配置文件
 def load_config() -> None:
-    global config_data
+    config_data = {}
     config_path = abspath("config.json")
     if isfile(config_path):
         try:
@@ -44,18 +49,25 @@ def load_config() -> None:
 
     # 设置默认值
     if config_data["uuid"] == None:
-        config_data["uuid"] = DEFAULT_UUID
-    config_data["host"] = config_data.get("host", DEFAULT_HOST)
-    config_data["port"] = config_data.get("port", DEFAULT_PORT)
-    config_data["uuid"] = config_data.get("uuid", DEFAULT_UUID)
-    config_data["file_block_size"] = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
-    config_data["reconnect_time"] = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
-    config_data["connect_timeout"] = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
+        config_data["uuid"] = Default.UUID
+    config_data["host"] = config_data.get("host", Default.HOST)
+    config_data["port"] = config_data.get("port", Default.PORT)
+    config_data["uuid"] = config_data.get("uuid", Default.UUID)
+    config_data["file_block_size"] = config_data.get("file_block_size", Default.FILE_BLOCK_SIZE)
+    config_data["reconnect_time"] = config_data.get("reconnect_time", Default.RECONNECT_TIME)
+    config_data["connect_timeout"] = config_data.get("connect_timeout", Default.CONNECT_TIMEOUT)
+    config_data["host_changed"] = config_data.get("host_changed", Default.HOST_CHANGED)
 
     # 将默认配置写回配置文件（如果文件缺少某些键）
+    save_config(config_data)
+    return config_data
+
+
+def save_config(config_dict: dict) -> None:
+    config_path = abspath("config.json")
     try:
         with open(config_path, "w") as f:
-            json.dump(config_data, f, indent=4)
+            json.dump(config_dict, f, indent=4)
     except OSError as e:
         print(f"Error saving config: {e}")
 
@@ -68,12 +80,16 @@ def random_hex(length: int) -> str:
 load_config()
 
 # 使用配置中的值
-FILE_BLOCK = config_data.get("file_block_size", DEFAULT_FILE_BLOCK_SIZE)
-reconnect_time = config_data.get("reconnect_time", DEFAULT_RECONNECT_TIME)
-connect_timeout = config_data.get("connect_timeout", DEFAULT_CONNECT_TIMEOUT)
+FILE_BLOCK = config_data.get("file_block_size", Default.FILE_BLOCK_SIZE)
+reconnect_time = config_data.get("reconnect_time", Default.RECONNECT_TIME)
+connect_timeout = config_data.get("connect_timeout", Default.CONNECT_TIMEOUT)
 
 
 class ClientStopped(BaseException):
+    pass
+
+
+class ClientRestart(BaseException):
     pass
 
 
@@ -124,6 +140,7 @@ class TimerLoop:
 
 class ActionManager:
     """实时在一个线程里按不同时间间隔运行不同的函数"""
+
     def __init__(self):
         self.actions: dict[str, tuple[TheAction, TimerLoop]] = {}
 
@@ -135,7 +152,7 @@ class ActionManager:
         timer_loop.start()
         self.actions[uuid] = (action, timer_loop)
         return uuid
-    
+
     def stop2clear(self):
         """停止所有定时任务并清空"""
         for _, timer in self.actions.values():
@@ -145,9 +162,9 @@ class ActionManager:
 
 class Client:
     def __init__(self, config: dict) -> None:
-        self.host = config.get("host") if config.get("host") else DEFAULT_HOST
-        self.port = config.get("port") if config.get("port") else DEFAULT_PORT
-        self.uuid = config.get("uuid") if config.get("uuid") else DEFAULT_UUID
+        self.host = config.get("host") if config.get("host") else Default.HOST
+        self.port = config.get("port") if config.get("port") else Default.PORT
+        self.uuid = config.get("uuid") if config.get("uuid") else Default.UUID
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.mouse_key_map = {
             "left": (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP),
@@ -175,6 +192,7 @@ class Client:
 
         self.packet_manager = PacketManager(self.connected)
         self.action_manager = ActionManager()
+        print("客户端初始化完成")
 
     def log(self, *values: object):
         text = " ".join(map(str, values))
@@ -205,6 +223,7 @@ class Client:
         self.log("成功连接至服务器!")
         self.sock.sendall(int(self.uuid, 16).to_bytes(8, "big"))
         self.shell_thread = start_and_return(self.shell_output_thread)
+        self.threads.append(self.shell_thread)
         self.threads.append(start_and_return(self.log_send_thread))
         self.threads.append(start_and_return(self.packet_send_thread))
         self.threads.append(start_and_return(self.connection_init))
@@ -296,21 +315,23 @@ class Client:
                     continue
                 self.send_packet(packet, True)
 
-    def run_infinitely(self):
+    def run_infinitely(self) -> bool:
+        """需要退出时返回False"""
         while True:
             # noinspection PyBroadException
             try:
-                self.start()
-            except Exception:
-                print("遇到错误")
-                pass
-            except ClientStopped:
-                print("服务端请求停止客户端")
-                break
+                if ERROR_DEBUG:
+                    self.start()
+                    continue
+                try:
+                    self.start()
+                except Exception:
+                    print("遇到未捕获的错误: 重启客户端")
+                    break
             except KeyboardInterrupt:
-                print("运行终止")
+                print("运行被用户终止")
                 self.connected = False
-                break
+                return False
 
     # noinspection PyUnresolvedReferences
     def parse_packet(self, packet: Packet) -> bool:
@@ -368,6 +389,17 @@ class Client:
             self.screen_quality = packet["video_quality"]
         elif packet["type"] == ACTION_ADD:
             self.action_manager.add_action(TheAction.from_packet(packet))
+        elif packet["type"] == CLIENT_RESTART:
+            raise ClientRestart
+        elif packet["type"] == CHANGE_ADDRESS:
+            global config_data
+            config_data = load_config()
+            config_data["host_changed"] = [packet["host"], packet["port"]].copy()
+            config_data["host"] = packet["host"]
+            config_data["port"] = packet["port"]
+            save_config(config_data)
+        elif packet["type"] == REQ_CONFIG:
+            self.send_packet({"type": CONFIG_RESULT, "config": config_data})
         return True
 
     def file_view_thread(self, packet: Packet):
@@ -443,9 +475,16 @@ class Client:
         global reconnect_time
         reconnect_time = config_data["reconnect_time"]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        host_changed: list[str, int] | None = config_data["host_changed"]
         while not self.connected:
             if self.try_connect():
                 break
+            if host_changed:
+                global config_data
+                config_data["host"] = host_changed[0]
+                config_data["port"] = host_changed[1]
+                config_data["host_changed"] = False
+                save_config(config_data)
             self.scroll_sleep(reconnect_time, "连接失败, 等待{}秒后重连: {}s")
             # reconnect_time *= 1.5
             reconnect_time = int(reconnect_time)
@@ -565,6 +604,17 @@ class Client:
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
         return self.packet_manager.recv_packet()
 
+    def stop(self):
+        print("停止客户端...")
+        self.sock.close()
+        if self.shell:
+            self.shell.terminate()
+        self.connected = False
+        try:
+            del self.camera
+        except OSError:
+            pass
+
     @property
     def connected(self):
         return self.__connected
@@ -576,6 +626,23 @@ class Client:
 
 
 if __name__ == "__main__":
-    load_config()
-    client = Client(config_data)
-    client.run_infinitely()
+    while True:
+        try:
+            client.stop()
+            del client
+        except NameError:
+            pass
+
+        config_data = load_config()
+        print("配置文件加载成功")
+        client = Client(config_data)
+
+        try:
+            ret = client.run_infinitely()
+            if ret == False:
+                break
+        except ClientStopped:
+            print("客户端被服务端停止")
+            break
+        except ClientRestart:
+            pass
