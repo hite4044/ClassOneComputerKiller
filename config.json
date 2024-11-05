@@ -4,5 +4,9 @@
     "uuid": "c254afb9dd8768da",
     "file_block_size": 102400,
     "reconnect_time": 2,
-    "connect_timeout": 2
+    "connect_timeout": 2,
+    "host_changed": null,
+    "record_key": false,
+    "timeout_add": false,
+    "timeout_add_multiplier": 1.5
 }

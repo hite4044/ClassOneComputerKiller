@@ -21,7 +21,7 @@ from libs.packets import *
 from libs.action import *
 
 # 固定设置项
-ERROR_DEBUG = False  # 启用已查看错误信息
+ERROR_DEBUG = True  # 启用已查看错误信息
 
 
 class Default:
@@ -41,18 +41,19 @@ class Default:
 
 class Config:
     """配置文件 加载, 调用, 保存 器"""
+    raw_config = {}
 
     def __init__(self, config_path: str = "config.json"):
         self.config_path = abspath(config_path)
-        self.raw_config = {}
         self.load_config()
+        print(self.raw_config)
 
     def load_config(self):
         config_data = self.load_file_config()
         for attr_name in dir(Default):
             if not attr_name.startswith("__"):
                 key_name = attr_name.lower()
-                self.raw_config[key_name] = config_data.get(key_name, getattr(Default, attr_name))
+                config_data[key_name] = config_data.get(key_name, getattr(Default, attr_name))
         self.raw_config = config_data
         self.save_config()
 
@@ -75,16 +76,16 @@ class Config:
             print(f"Error saving config: {e}")
 
     def __getattr__(self, name: str):
-        if name in self.raw_config.keys():
-            return self.raw_config[name]
-        else:
-            raise RuntimeError(f"Config key {name} not found")
+        raw_config: dict = object.__getattribute__(self, "raw_config")
+        if name in raw_config.keys():
+            return raw_config[name]
+        return object.__getattribute__(self, name)
 
     def __setattr__(self, name: str, value: Any):
-        if name in self.raw_config.keys():
-            self.raw_config[name] = value
-        else:
-            raise RuntimeError(f"Config key {name} not found")
+        raw_config: dict = object.__getattribute__(self, "raw_config")
+        if name in raw_config.keys():
+            raw_config[name] = value
+        object.__setattr__(self, name, value)
 
 
 def random_hex(length: int) -> str:
