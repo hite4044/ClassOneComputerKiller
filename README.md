@@ -8,7 +8,12 @@
 GUI使用[wxPython](https://github.com/wxWidgets/Phoenix)实现, 这是我第一次使用这个库, 有写得不好的请见谅
 
 
-## 如何运行
+## 如何使用项目
+### 方法1 (版本旧) (方便)
+1. 到Release下载受控端程序 (推荐文件夹版本)
+2. 运行程序，修改exe同目录下的config.json里的端口与域名并重新启动客户端 (需自行设置开机自启动)
+3. 运行main.py（一般需要你将端口开放至公网）
+### 方法2 (版本最新) (麻烦)
 1. 下载项目 `git clone https://github.com/hite4044/ClassOneComputerKiller.git`
 2. 安装依赖 `pip install -r requirements.txt`
 3. 修改`client.py`里的`DEFAULT_PORT`和`DEFAULT_HOST` (你可能需要使用Frp服务)
@@ -27,6 +32,11 @@ GUI使用[wxPython](https://github.com/wxWidgets/Phoenix)实现, 这是我第一
 - 客户端列表
 - 文件传输
 - 网络交通显示
+
+
+## 项目食用方法
+项目内含注释很少，主要还是靠自己理解，我已经尽量拆分成多文件了
+
 
 ## 软件设计稿
  因为我的相机是广角相机，所以可能我处理得不是很好

@@ -28,9 +28,14 @@ class ClientAPI:
         self.recv_callbacks = []
         self.raw_recv_func = client.recv_packet
         client.recv_packet = self._recv_packet
+        self.raw_send_func = client.send_packet
+        client.send_packet = self._send_packet
 
     def register_recv_cbk(self, callback: Callable[[int, Packet], None]):
         self.recv_callbacks.append(callback)
+    
+    def register_send_cbk(self, callback: Callable[[int, bytes], None]):
+        self.send_callbacks.append(callback)
 
     def send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER):
         return self.client.send_packet(packet, loss_enable, priority)
@@ -64,6 +69,11 @@ class ClientAPI:
         for callback in self.recv_callbacks:
             callback(length, packet)
         return length, packet
+    
+    def _send_packet(self, packet: Packet, loss_enable: bool = False, priority: int = Priority.HIGHER):
+        length, data = self.raw_send_func(packet, loss_enable, priority)
+        for callback in self.send_callbacks:
+            callback(length, data)
 
     @property
     def sending_screen(self):

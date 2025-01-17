@@ -1,26 +1,25 @@
 import wx
 import ctypes
 import wx.grid
-from wx import grid
 from PIL import Image
 from io import BytesIO
 from time import localtime
 from ctypes import wintypes
-from typing import Callable
-from win32api import GetCursorPos
+from os.path import join as abspath
 from wx._core import wxAssertionError
 from base64 import b64decode, b64encode
-from win32com.shell import shell, shellcon  # type: ignore
-from win32con import FILE_ATTRIBUTE_NORMAL
-from os.path import join as path_join, normpath, abspath
 
 app = wx.App()
-from libs.action import *
-from libs.widgets import *
-from libs.api import ClientAPI, get_api, get_window_name
+from gui.widgets import *
+from gui.screen import ScreenTab
+from gui.files import FilesTab, FileViewer
+from gui.terminal import TerminalTab
+from gui.network import NetworkTab
+from gui.action import ActionTab
+from gui.setting import SettingTab
+from libs.api import ClientAPI
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
-MAX_HISTORY_LENGTH = 100000
 DEFAULT_COMPUTER_TEXT = "已连接的电脑"
 
 ExtractIconExA = ctypes.windll.shell32.ExtractIconExA
@@ -43,20 +42,6 @@ def format_size(size_in_bytes) -> str:
     return f"{size_in_bytes:.2f} {units[index]}"
 
 
-def extension_to_bitmap(extension) -> wx.Bitmap:
-    """dot is mandatory in extension"""
-
-    flags = shellcon.SHGFI_SMALLICON | shellcon.SHGFI_ICON | shellcon.SHGFI_USEFILEATTRIBUTES
-    retval, info = shell.SHGetFileInfo(extension, FILE_ATTRIBUTE_NORMAL, flags)
-    assert retval
-    hicon, _, _, _, _ = info
-    icon: wx.Icon = wx.Icon()
-    icon.SetHandle(hicon)
-    bmp = wx.Bitmap()
-    bmp.CopyFromIcon(icon)
-    return bmp
-
-
 def GetSystemIcon(index: int) -> wx.Icon:
     shell32dll = ctypes.create_string_buffer("C:\\Windows\\System32\\shell32.dll".encode(), 260)
     small_icon = wintypes.HICON()
@@ -77,43 +62,6 @@ def GetSystemIcon(index: int) -> wx.Icon:
 
 def load_icon_file(file_path: str) -> wx.Icon:
     return wx.Icon(name=abspath(file_path))
-
-
-class DataType:
-    FILE = 0
-    FOLDER = 1
-
-
-class FilesData:
-    def __init__(self, _type: int, name: str, item_id: wx.TreeItemId):
-        self.name = name
-        self.type = _type
-        self.item_id = item_id
-
-        self.name_dict: dict[str, tuple[int, wx.TreeItemId, FilesData | None]] = {}
-        self.id_dict: dict[wx.TreeItemId, tuple[int, str, FilesData | None]] = {}
-
-    def add(self, _type: int, name, item_id: wx.TreeItemId):
-        if self.type == DataType.FILE:
-            raise RuntimeError("Cannot add children to a file")
-        self.name_dict[name] = (_type, item_id, FilesData(_type, name, item_id))
-        self.id_dict[item_id] = (_type, name, FilesData(_type, name, item_id))
-
-    def name_get(self, name: str):
-        return self.name_dict[name]
-
-    def id_get(self, item_id: wx.TreeItemId):
-        return self.id_dict[item_id]
-
-    def name_tree_get(self, names: list[str]):
-        ret = self
-        for name in names:
-            ret = ret.name_dict[name][2]
-        return ret
-
-    def clear(self):
-        self.name_dict.clear()
-        self.id_dict.clear()
 
 
 class ClientsContainer(wx.ScrolledWindow):
@@ -160,7 +108,10 @@ class ClientListWindow(wx.Frame):
         print(f"已在 {SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]} 上启动监听")
         while True:
             conn, addr = sock.accept()
-            uuid = conn.recv(8)
+            try:
+                uuid = conn.recv(8)
+            except ConnectionResetError:
+                continue
             print("客户端UUID:", hex(int.from_bytes(uuid, "big")))
             for addr, client in self.clients.items():
                 assert isinstance(client, Client)
@@ -175,7 +126,9 @@ class ClientListWindow(wx.Frame):
             self.clients[addr] = client
 
     def add_client(self, parent, connection: socket.socket, address, uuid: bytes):
+        timer = perf_counter()
         client = Client(parent, connection, address, uuid)
+        print(f"客户端初始化耗时 {ms(timer)} ms")
         self.clients[address] = client
 
 
@@ -295,1001 +248,6 @@ class ClientCard(Panel):
         self.client.SetFocus()
 
 
-class ScreenShower(Panel):
-    def __init__(self, parent, size):
-        super().__init__(parent=parent, size=size)
-        self.menu: wx.Menu = ...
-        self.screen_raw_size = (1920, 1080)
-        self.last_size = None
-        self.bmp = None
-        self.last_size_send = perf_counter()
-        self.last_move_send = perf_counter()
-        self.api = get_api(self)
-        self.button_map = {
-            wx.MOUSE_BTN_LEFT: "left",
-            wx.MOUSE_BTN_RIGHT: "right",
-            wx.MOUSE_BTN_MIDDLE: "middle",
-        }
-
-        self.Bind(wx.EVT_SIZE, self.on_size)
-        self.Bind(wx.EVT_PAINT, self.OnPaint)
-        self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
-        self.Bind(wx.EVT_RIGHT_DOWN, self.on_menu)
-
-    def set_bitmap(self, bitmap: wx.Bitmap):
-        self.bmp = bitmap
-        self.OnPaint(None)
-
-    def OnPaint(self, event: wx.PaintEvent = None):
-        if self.bmp:
-            dc = wx.ClientDC(self)
-            dc.DrawBitmap(self.bmp, 0, 0)
-            self.Refresh(False, self.GetRect())
-        if event:
-            event.Skip()
-
-    def on_size(self, event: wx.Event = None):
-        if self.api.pre_scale and self.api.sending_screen:
-            if perf_counter() - self.last_size_send > 0.1:
-                new_size = self.GetSize()
-                if 0 in new_size:
-                    return
-                if new_size != self.last_size:
-                    packet = {
-                        "type": SET_SCREEN_SIZE,
-                        "data_max_size": 1024 * 1024,
-                        "size": tuple(new_size),
-                    }
-                    self.api.send_packet(packet)
-                    self.last_size = new_size
-                    self.last_size_send = perf_counter()
-        if event:
-            event.Skip()
-
-    def on_menu(self, _):
-        menu = wx.Menu()
-        menu.Append(1, "获取屏幕")
-        item: wx.MenuItem = menu.Append(2, "视频模式", kind=wx.ITEM_CHECK)
-        menu.Bind(wx.EVT_MENU, self.send_get_screen, id=1)
-        menu.Bind(wx.EVT_MENU, self.send_video_mode, id=2)
-        item.Check(self.api.sending_screen)
-        self.PopupMenu(menu)
-        self.menu = menu
-
-    def send_get_screen(self, _):
-        packet = {"type": GET_SCREEN}
-        self.api.send_packet(packet)
-
-    def send_video_mode(self, _):
-        self.api.set_screen_send(not self.api.sending_screen)
-
-    def on_mouse(self, event: wx.MouseEvent):
-        if self.api.mouse_control:
-            packet = None
-            if event.Moving() and perf_counter() - self.last_move_send > 0.1:
-                packet = {"type": SET_MOUSE_POS, "x": event.GetX(), "y": event.GetY()}
-                self.last_move_send = perf_counter()
-            elif event.IsButton():
-                if event.ButtonDown():
-                    packet = {
-                        "type": SET_MOUSE_BUTTON,
-                        "button": self.button_map[event.GetButton()],
-                        "state": 0,
-                        "x": event.GetX(),
-                        "y": event.GetY(),
-                    }
-                elif event.ButtonUp():
-                    packet = {
-                        "type": SET_MOUSE_BUTTON,
-                        "button": self.button_map[event.GetButton()],
-                        "state": 1,
-                        "x": event.GetX(),
-                        "y": event.GetY(),
-                    }
-
-            if packet:
-                self.api.send_packet(packet)
-        if event:
-            event.Skip()
-
-
-class ComputerControlSetter(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1500, 31))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.SetFont(ft(13))
-        self.text = wx.StaticText(self, label="电脑控制:")
-        self.mouse_ctl = wx.CheckBox(self, label="鼠标控制")
-        self.mouse_ctl.Bind(
-            wx.EVT_CHECKBOX,
-            lambda _: self.api.set_mouse_ctl(self.mouse_ctl.GetValue()),
-        )
-        self.keyboard_ctl = wx.CheckBox(self, label="键盘控制")
-        self.keyboard_ctl.Bind(
-            wx.EVT_CHECKBOX,
-            lambda _: self.api.set_keyboard_ctl(self.keyboard_ctl.GetValue()),
-        )
-        self.video_mode_ctl = wx.CheckBox(self, label="视频模式")
-        self.video_mode_ctl.Bind(
-            wx.EVT_CHECKBOX,
-            lambda _: self.api.set_screen_send(self.video_mode_ctl.GetValue()),
-        )
-        self.get_screen_btn = wx.Button(self, label="获取屏幕")
-        self.get_screen_btn.Bind(wx.EVT_BUTTON, self.send_get_screen)
-        self.api = get_api(self)
-
-        self.text.SetFont(ft(14))
-
-        self.sizer.AddSpacer(10)
-        self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(20)
-        self.sizer.Add(self.mouse_ctl, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(20)
-        self.sizer.Add(self.keyboard_ctl, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(20)
-        self.sizer.Add(self.video_mode_ctl, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(20)
-        self.sizer.Add(
-            self.get_screen_btn,
-            flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP | wx.BOTTOM,
-            border=1,
-        )
-        self.SetSizer(self.sizer)
-
-    def send_get_screen(self, _):
-        packet = {"type": GET_SCREEN, "size": tuple(self.GetSize())}
-        self.api.send_packet(packet)
-
-
-class FormatRadioButton(wx.RadioButton):
-    def __init__(self, parent, text: str, value, cbk):
-        super().__init__(parent=parent, label=text)
-        self.Bind(wx.EVT_RADIOBUTTON, lambda _: cbk(value))
-        self.Bind(wx.EVT_SIZE, lambda _: self.Update())
-
-
-class PreScaleCheckBox(wx.CheckBox):
-    def __init__(self, parent):
-        super().__init__(parent=parent, label="预缩放")
-        self.api = get_api(self)
-        self.Bind(wx.EVT_CHECKBOX, self.OnSwitch)
-        self.SetValue(True)
-
-    def OnSwitch(self, _):
-        enable = self.GetValue()
-        self.api.set_pre_scale(enable)
-
-
-class ScreenFormatSetter(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1500, 31))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.SetFont(ft(13))
-        self.text = wx.StaticText(self, label="屏幕格式:")
-        self.jpg_button = FormatRadioButton(self, "JPG", ScreenFormat.JPEG, self.set_format)
-        self.png_button = FormatRadioButton(self, "PNG", ScreenFormat.PNG, self.set_format)
-        self.raw_button = FormatRadioButton(self, "Raw", ScreenFormat.RAW, self.set_format)
-        self.pre_scale_box = PreScaleCheckBox(self)
-
-        self.sizer.AddSpacer(10)
-        self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(15)
-        self.sizer.Add(self.jpg_button, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(25)
-        self.sizer.Add(self.png_button, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(25)
-        self.sizer.Add(self.raw_button, flag=wx.ALIGN_LEFT | wx.EXPAND)
-        self.sizer.AddSpacer(25)
-        self.sizer.Add(self.pre_scale_box, flag=wx.ALIGN_LEFT | wx.EXPAND)
-
-        self.jpg_button.SetValue(True)
-        self.sizer.Layout()
-        self.SetSizer(self.sizer)
-        self.text.SetFont(ft(14))
-        self.api = get_api(self)
-
-        BToolTip(self.text, "在屏幕的网络传输中使用的格式", ft(10))
-        BToolTip(self.pre_scale_box, "占用更少带宽", ft(10))
-        BToolTip(self.jpg_button, "带宽: 小, 质量: 高, 性能: 快", ft(10))
-        BToolTip(self.png_button, "带宽: 中, 质量: 无损, 性能: 慢", ft(10))
-        BToolTip(self.raw_button, "带宽: 大, 质量: 无损, 性能: 快", ft(10))
-
-        self.format_lock = Lock()
-        self.Update()
-
-    def set_format(self, value: str):
-        controller: ScreenController = self.api.client.screen_tab.screen_panel.controller
-        if value != ScreenFormat.JPEG:
-            controller.sizer.Hide(controller.screen_quality_setter)
-        else:
-            controller.sizer.Show(controller.screen_quality_setter)
-        start_and_return(self._set_format, (value,))
-
-    def _set_format(self, value: str):
-        with self.format_lock:
-            packet = {"type": SET_SCREEN_FORMAT, "format": value}
-            if self.api.connected:
-                self.api.send_packet(packet)
-
-
-class ScreenFPSSetter(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1500, 31))
-
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.text = wx.StaticText(self, label="监视帧率:")
-        self.input_slider = InputSlider(self, value=10, _min=1, _max=60, _from=0, to=60)
-
-        self.sizer.AddSpacer(10)
-        self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(15)
-        self.sizer.Add(self.input_slider, flag=wx.ALIGN_LEFT | wx.EXPAND)
-
-        BToolTip(self.text, "屏幕传输的帧率\n帧率越高, 带宽占用越大", ft(10))
-
-        self.text.SetFont(ft(14))
-        self.input_slider.cbk = get_api(self).set_screen_fps
-        self.SetSizer(self.sizer)
-        self.Update()
-
-
-class ScreenQualitySetter(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1500, 31))
-
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.text = wx.StaticText(self, label="屏幕质量:")
-        self.input_slider = InputSlider(self, value=80, _min=1, _max=100, _from=0, to=100)
-
-        self.sizer.AddSpacer(10)
-        self.sizer.Add(self.text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(15)
-        self.sizer.Add(self.input_slider, flag=wx.ALIGN_LEFT | wx.EXPAND)
-
-        BToolTip(self.text, "屏幕传输的质量\n质量越高, 带宽占用越大", ft(10))
-        self.text.SetFont(ft(14))
-        self.input_slider.cbk = get_api(self).set_screen_quality
-        self.SetSizer(self.sizer)
-
-
-class ScreenInformationShower(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1500, 32))
-
-        self.SetFont(ft(14))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.FPS_text = wx.StaticText(self, label="FPS: 0")
-        self.network_text = wx.StaticText(self, label="占用带宽: 0 KB/s")
-        self.delay_text = wx.StaticText(self, label="延迟: 0 ms")
-        self.sizer.AddSpacer(10)
-        self.sizer.Add(self.FPS_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(100)
-        self.sizer.Add(self.network_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-        self.sizer.AddSpacer(100)
-        self.sizer.Add(self.delay_text, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=3)
-
-        BToolTip(self.FPS_text, "反映了屏幕传输的流畅度", ft(10))
-        BToolTip(self.network_text, "屏幕传输占用的带宽", ft(10))
-        BToolTip(self.delay_text, "客户端到服务器的延迟", ft(10))
-        self.SetSizer(self.sizer)
-
-        self.fps_avg = []
-        self.network_avg = []
-        self.collect_inv = 0.5
-        self.api = get_api(self)
-        self.update_timer = wx.Timer(self)
-        self.Bind(wx.EVT_TIMER, self.update_data, self.update_timer)
-        self.update_timer.Start(int(self.collect_inv * 1000))
-        self.delay_timer = wx.Timer(self)
-        self.Bind(wx.EVT_TIMER, self.req_update_data, self.delay_timer)
-        self.delay_timer.Start(1000)
-
-    def update_data(self, event: wx.TimerEvent = None):
-        self.update_fps()
-        self.update_network()
-        if event:
-            event.Skip()
-
-    def req_update_data(self, event: wx.TimerEvent = None):
-        self.api.send_packet({"type": PING, "timer": perf_counter()}, priority=Priority.HIGHEST)
-        event.Skip()
-
-    def update_fps(self):
-        self.fps_avg.append(self.api.screen_counter / self.collect_inv)
-        self.api.screen_counter = 0
-        if len(self.fps_avg) > 10:
-            self.fps_avg.pop(0)
-        self.FPS_text.SetLabel("FPS: " + str(round(sum(self.fps_avg) / len(self.fps_avg), 1)))
-
-    def update_network(self):
-        self.network_avg.append(self.api.screen_network_counter / self.collect_inv)
-        self.api.screen_network_counter = 0
-        if len(self.network_avg) > 10:
-            self.network_avg.pop(0)
-        self.network_text.SetLabel(
-            "占用带宽: " + format_size(sum(self.network_avg) / len(self.network_avg)) + " /s"
-        )
-
-    def update_delay(self, delay: int):
-        self.delay_text.SetLabel(f"延迟: {round(delay*1000, 2)} ms")
-
-
-class ScreenController(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1270, 160))
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.control_setter = ComputerControlSetter(self)
-        self.screen_format_setter = ScreenFormatSetter(self)
-        self.screen_fps_setter = ScreenFPSSetter(self)
-        self.screen_quality_setter = ScreenQualitySetter(self)
-        self.info_shower = ScreenInformationShower(self)
-        self.sizer.Add(self.control_setter, flag=wx.ALIGN_TOP | wx.EXPAND)
-        # self.sizer.AddSpacer(2)
-        self.sizer.Add(wx.StaticLine(self), flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(self.screen_format_setter, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(self.screen_fps_setter, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(
-            self.screen_quality_setter,
-            flag=wx.ALIGN_TOP | wx.EXPAND | wx.RESERVE_SPACE_EVEN_IF_HIDDEN,
-        )
-        self.sizer.AddSpacer(3)
-        self.sizer.Add(wx.StaticLine(self), flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(self.info_shower, flag=wx.ALIGN_TOP | wx.EXPAND)
-        # self.sizer.Layout()
-        self.SetSizer(self.sizer)
-
-
-class ScreenPanel(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(960, 1112))
-        self.screen_shower = ScreenShower(self, (int(1920 / 2), int(1080 / 2)))
-        self.controller = ScreenController(self)
-
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.sizer.Add(self.screen_shower, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=1)
-        self.sizer.Add(self.controller, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0)
-        self.sizer.Layout()
-        self.SetSizer(self.sizer)
-
-        self.screen_shower.SetSize((int(1920 / 1.5), int(1080 / 1.5)))
-
-
-class KeyMonitorPanel(Panel):
-    def __init__(self, parent: wx.Window):
-        super().__init__(parent=parent, size=(220, 680))
-        self.sizer = wx.StaticBoxSizer(wx.VERTICAL, self, "键盘监听")
-        self.key_monitor = wx.ListBox(self, size=MAX_SIZE, style=wx.LB_HSCROLL)
-        self.sizer.Add(self.key_monitor, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Layout()
-        self.SetSizer(self.sizer)
-        self.index = 0
-
-        self.key_monitor.SetFont(ft(10))
-        self.key_monitor.Append("")
-        self.key_monitor.Bind(wx.EVT_RIGHT_DOWN, self.on_menu)
-
-    def add_string(self, s: str):
-        try:
-            s = self.key_monitor.GetString(self.index) + s
-            self.key_monitor.SetString(self.index, s)
-        except wxAssertionError:
-            self.key_monitor.Append(s)
-
-    def key_press(self, key: str):
-        if key == "enter":
-            self.add_string("↴")
-            self.index += 1
-            self.add_string("")
-            return
-        elif len(key) > 1:
-            key = f"[{key}]"
-        self.add_string(key)
-
-    def on_menu(self, _):
-        menu = wx.Menu()
-        menu.Append(1, "清空")
-        self.Bind(wx.EVT_MENU, self.clear, id=1)
-        self.PopupMenu(menu)
-        menu.Destroy()
-
-    def clear(self, _):
-        self.key_monitor.Clear()
-        self.key_monitor.Append("")
-        self.index = 0
-
-
-class ScreenTab(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=MAX_SIZE)
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.screen_panel = ScreenPanel(self)
-        self.key_panel = KeyMonitorPanel(self)
-
-        self.sizer.Add(self.screen_panel, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=32)
-        self.sizer.Add(self.key_panel, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=9)
-        self.sizer.SetItemMinSize(self.key_panel, 250, 700)
-        self.sizer.Layout()
-        self.SetSizer(self.sizer)
-
-
-class FilesTreeView(wx.TreeCtrl):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=MAX_SIZE, style=wx.TR_DEFAULT_STYLE | wx.TR_HIDE_ROOT)
-
-        self.image_list = wx.ImageList(16, 16, True)
-        self.folder_icon = self.image_list.Add(
-            wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_OTHER, (16, 16))
-        )
-        self.default_icon = self.image_list.Add(
-            wx.ArtProvider.GetBitmap(wx.ART_NORMAL_FILE, wx.ART_OTHER, (16, 16))
-        )
-        self.icons = {}
-        self.AssignImageList(self.image_list)
-        self.Bind(wx.EVT_TREE_ITEM_EXPANDING, self.on_expend)
-
-        self.api = get_api(self)
-        self.load_over_flag = False
-
-        root = self.AddRoot("命根子")
-        self.files_data: FilesData = FilesData(DataType.FOLDER, "root", root)
-        c_disk = self.AppendItem(root, "C:", image=self.folder_icon)
-        d_disk = self.AppendItem(root, "D:", image=self.folder_icon)
-        self.AppendItem(c_disk, "加载中...")
-        self.AppendItem(d_disk, "加载中...")
-        self.files_data.add(DataType.FOLDER, "C:", c_disk)
-        self.files_data.add(DataType.FOLDER, "D:", d_disk)
-
-        self.Bind(wx.EVT_TREE_ITEM_MENU, self.on_menu)
-
-    def load_packet(self, packet: Packet):
-        root_path = packet["path"]
-        dirs = packet["dirs"]
-        files = packet["files"]
-
-        paths: list = normpath(root_path).split("\\")
-        paths.pop(-1) if paths[-1] == "" else None
-        correct_dir = self.files_data.name_tree_get(paths)
-        root_id = correct_dir.item_id
-
-        correct_dir.clear()
-        self.DeleteChildren(root_id)
-
-        for dir_name in dirs:
-            item_id = self.AppendItem(root_id, dir_name, image=self.folder_icon)
-            self.AppendItem(item_id, "加载中...")
-            correct_dir.add(DataType.FOLDER, dir_name, item_id)
-        for file_name in files:
-            assert isinstance(file_name, str)
-            if "." in file_name:
-                extension = file_name.split(".")[-1]
-                if extension not in self.icons:
-                    self.icons[extension] = self.image_list.Add(extension_to_bitmap("." + extension))
-                icon = self.icons[extension]
-            else:
-                icon = self.default_icon
-            item_id = self.AppendItem(root_id, file_name, image=icon)
-            correct_dir.add(DataType.FILE, file_name, item_id)
-        if len(dirs + files) != 0:
-            self.load_over_flag = True
-            self.Expand(root_id)
-
-    def on_expend(self, event: wx.TreeEvent):
-        if self.load_over_flag:
-            self.load_over_flag = False
-            return
-        item = event.GetItem()
-        text: wx.TreeItemId = self.GetLastChild(item)
-        if text.IsOk() and self.GetItemText(text) == "加载中...":
-            self.request_list_dir(item)
-            event.Veto()
-
-    def get_item_path(self, item: wx.TreeItemId):
-        path = ""
-        while True:
-            if item == self.GetRootItem():
-                break
-            name = str(self.GetItemText(item))
-            if ":" in name:
-                name += "\\"
-            path = path_join(name, path)
-            item = self.GetItemParent(item)
-        return path
-
-    def request_list_dir(self, item: wx.TreeItemId):
-        self._request_list_dir(self.get_item_path(item))
-
-    def _request_list_dir(self, path: str):
-        packet = {"type": REQ_LIST_DIR, "path": path}
-        self.load_over_flag = False
-        self.api.send_packet(packet)
-
-    def on_menu(self, event: wx.TreeEvent):
-        item_id: wx.TreeItemId = event.GetItem()
-        if not item_id.IsOk():
-            return
-        path = normpath(self.get_item_path(item_id))
-        paths = path.split("\\")
-        paths.pop(-1) if paths[-1] == "" else None
-        files_data: FilesData = self.files_data.name_tree_get(paths)
-
-        menu = wx.Menu()
-        if files_data.type == DataType.FILE:
-            menu.Append(1, "查看内容")
-            menu.Append(2, "下载")
-            menu.Append(3, "删除")
-            menu.Append(4, "属性")
-            menu.Bind(wx.EVT_MENU, lambda _: self.view_file(path), id=1)
-            menu.Bind(wx.EVT_MENU, lambda _: self.delete_path(path, item_id), id=3)
-        elif files_data.type == DataType.FOLDER:
-            menu.Append(1, "刷新此文件夹")
-            menu.Append(2, "删除")
-            menu.Append(3, "属性")
-            menu.Bind(wx.EVT_MENU, lambda _: self.refresh_dir(path, item_id), id=1)
-        self.PopupMenu(menu)
-
-    def view_file(self, path: str):
-        path = normpath(path)
-        packet = {"type": FILE_VIEW, "path": path, "data_max_size": 1024 * 100}
-        self.api.send_packet(packet)
-
-    def refresh_dir(self, path: str, item_id: wx.TreeItemId):
-        path = normpath(path)
-        self.Collapse(item_id)
-        self._request_list_dir(path)
-
-    def delete_path(self, path: str, item_id: wx.TreeItemId):
-        packet = {"type": FILE_DELETE, "path": path}
-        self.api.send_packet(packet)
-        self.Delete(item_id)
-
-
-class FileTransport(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(400, 668))
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.main_bar = wx.Gauge(self, range=100)
-
-
-class FilesTab(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 668))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.viewer = FilesTreeView(self)
-        self.files_transport_panel = FileTransport(self)
-        self.sizer.Add(self.viewer, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Add(self.files_transport_panel, flag=wx.ALIGN_TOP | wx.EXPAND)
-        self.sizer.Layout()
-        self.SetSizer(self.sizer)
-
-
-class FileViewer(wx.Frame):
-    def __init__(self, parent: wx.Frame, path: str, data: bytes):
-        wx.Frame.__init__(self, parent=parent, title=path, size=(800, 600))
-        self.path = normpath(path)
-        self.data = data
-
-        self.text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY)
-        encodes = [
-            "utf-8",
-            "gbk",
-            "utf-16",
-            "gb2312",
-            "gb18030",
-            "big5",
-            "shift_jis",
-            "euc_jp",
-            "cp932",
-        ]
-        for encode in encodes:
-            try:
-                self.text.AppendText(data.decode(encode))
-                break
-            except UnicodeDecodeError:
-                pass
-        else:
-            self.text.AppendText(data.decode("utf-8", "ignore"))
-
-        self.ctrl_down = False
-        self.text.Bind(wx.EVT_MOUSEWHEEL, self.on_scroll)
-        self.text.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
-        self.text.Bind(wx.EVT_KEY_UP, self.on_key_up)
-
-        menu_bar = wx.MenuBar()
-        menu = wx.Menu()
-        menu_bar.Append(menu, "另存为")
-        menu.Bind(wx.EVT_MENU_OPEN, self.save_as)
-        self.SetMenuBar(menu_bar)
-
-        self.Show()
-
-    def save_as(self, event: wx.MenuEvent):
-        try:
-            extension = self.path.split(".")[-1]
-        except IndexError:
-            extension = "*"
-        file_name = self.path.split("\\")[-1]
-        with wx.FileDialog(
-            self,
-            "另存为",
-            wildcard="*." + extension,
-            defaultFile=file_name,
-            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
-        ) as file_dialog:
-            if file_dialog.ShowModal() == wx.ID_CANCEL:
-                return
-            path = file_dialog.GetPath()
-            with open(path, "wb") as f:
-                f.write(self.data)
-        event.Skip()
-
-    def on_key_down(self, event: wx.KeyEvent):
-        if event.GetKeyCode() == wx.WXK_CONTROL:
-            self.ctrl_down = True
-        event.Skip()
-
-    def on_key_up(self, event: wx.KeyEvent):
-        if event.GetKeyCode() == wx.WXK_CONTROL:
-            self.ctrl_down = False
-        event.Skip()
-
-    def on_scroll(self, event: wx.MouseEvent):
-        if self.ctrl_down:
-            if event.GetWheelRotation() > 0:
-                self.font_size += 1
-            else:
-                self.font_size -= 1
-            self.text.SetFont(ft(self.font_size))
-        event.Skip()
-
-
-class TerminalText(wx.TextCtrl):
-    def __init__(self, parent):
-        wx.TextCtrl.__init__(
-            self,
-            parent=parent,
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_CHARWRAP,
-            size=(1226, 700),
-        )
-        self.Bind(wx.EVT_CONTEXT_MENU, self.on_menu)
-        self.api = get_api(self)
-        self.SetForegroundColour(wx.Colour(204, 204, 204))
-        self.SetBackgroundColour(wx.Colour(14, 14, 14))
-
-        pixel_font = wx.Font(
-            12,
-            wx.FONTFAMILY_DEFAULT,
-            wx.FONTSTYLE_NORMAL,
-            wx.FONTWEIGHT_NORMAL,
-            False,
-            "宋体",
-        )
-        self.SetFont(pixel_font)
-
-    def load_packet(self, packet: Packet):
-        output: str = packet["output"]
-        if chr(12) in output:
-            self.Clear()
-            output = output[output.find(chr(12)) + 1 :]
-        if len(self.GetValue()) > MAX_HISTORY_LENGTH:
-            self.Remove(0, self.GetLastPosition() - MAX_HISTORY_LENGTH)
-        self.AppendText(output)
-
-    def on_menu(self, _: wx.MenuEvent):
-        menu = wx.Menu()
-        menu.Append(1, "清空")
-        menu.Append(2, "重启终端")
-        menu.Bind(wx.EVT_MENU, self.clear_and_send, id=1)
-        menu.Bind(wx.EVT_MENU, self.restore_shell, id=2)
-        self.PopupMenu(menu)
-
-    def clear_and_send(self, event: wx.MenuEvent):
-        self.api.send_command("")
-        self.Clear()
-        event.Skip()
-
-    def restore_shell(self, _):
-        self.Clear()
-        self.api.restore_shell()
-
-
-class TerminalInput(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 32))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.text = wx.TextCtrl(self, size=(1200, 28), style=wx.TE_PROCESS_ENTER)
-        self.send_button = wx.Button(self, label="发送", size=(75, 31))
-        self.sizer.Add(self.text, flag=wx.ALIGN_TOP | wx.EXPAND | wx.TOP, border=1, proportion=1)
-        self.sizer.AddSpacer(3)
-        self.sizer.Add(self.send_button, flag=wx.ALIGN_TOP, proportion=0)
-        self.sizer.AddSpacer(2)
-        self.SetSizer(self.sizer)
-
-        self.tip_text = "请输入命令"
-        self.on_tip = False
-        self.has_focus = False
-        self.normal_color = self.GetForegroundColour()
-        self.gray_color = wx.Colour((76, 76, 76))
-        self.api = get_api(self)
-        self.text.Bind(wx.EVT_SET_FOCUS, self.on_focus)
-        self.text.Bind(wx.EVT_KILL_FOCUS, self.on_focus_out)
-        self.text.Bind(wx.EVT_KEY_DOWN, self.on_enter)
-        self.send_button.Bind(wx.EVT_BUTTON, lambda _: self.send())
-        self.on_focus_out()
-        self.send_button.SetFont(ft(10))
-
-        self.command_history = []
-        self.history_index = 0
-
-    def on_focus(self, event: wx.FocusEvent):
-        self.has_focus = True
-        if self.on_tip:
-            self.text.SetValue("")
-            self.text.SetForegroundColour(self.normal_color)
-            self.on_tip = False
-        event.Skip()
-
-    def on_focus_out(self, event: wx.FocusEvent = None):
-        self.has_focus = False
-        wx.CallLater(100, self.check_insert_tip)
-        if event:
-            event.Skip()
-
-    def check_insert_tip(self):
-        if not self.has_focus:
-            if self.text.GetValue() == "":
-                self.text.SetValue(self.tip_text)
-                self.text.SetForegroundColour(self.gray_color)
-                self.on_tip = True
-
-    def on_enter(self, event: wx.KeyEvent):
-        if event.GetKeyCode() == wx.WXK_NUMPAD_ENTER or event.GetKeyCode() == wx.WXK_RETURN:
-            self.send()
-        elif event.GetKeyCode() == wx.WXK_UP:
-            if self.history_index > 0:
-                self.history_index -= 1
-                self.text.SetValue(self.command_history[self.history_index])
-                self.text.SetInsertionPointEnd()
-        elif event.GetKeyCode() == wx.WXK_DOWN:
-            if self.history_index < len(self.command_history) - 1:
-                self.history_index += 1
-                self.text.SetValue(self.command_history[self.history_index])
-                self.text.SetInsertionPointEnd()
-        else:
-            event.Skip()
-
-    def send(self):
-        self.text.SetFocus()
-        if self.text.GetValue() != "":
-            self.command_history.append(self.text.GetValue())
-        self.history_index = len(self.command_history)
-        self.api.send_command(self.text.GetValue())
-        self.text.Clear()
-
-
-class TerminalTab(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 668))
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.cmd_text = TerminalText(self)
-        self.inputter = TerminalInput(self)
-        self.sizer.Add(self.cmd_text, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=1)
-        self.sizer.AddSpacer(3)
-        self.sizer.Add(self.inputter, flag=wx.ALIGN_TOP | wx.EXPAND, proportion=0)
-        self.SetSizer(self.sizer)
-
-
-class NetworkTab(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 668))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.text = wx.StaticText(self, label="byd不想做, 感觉没用")
-        self.sizer.Add(self.text)
-        self.SetSizer(self.sizer)
-
-        self.text.SetFont(ft(90))
-
-
-class ActionGrid(grid.Grid):
-    def __init__(self, parent: wx.Window):
-        super().__init__(parent, size=MAX_SIZE)
-        self.CreateGrid(1, 4)
-        gui_data = [
-            ("名称", 100),
-            ("触发条件", 300),
-            ("执行操作", 180),
-            ("停止条件", 300),
-        ]
-
-        for i in range(len(gui_data)):
-            name, width = gui_data[i]
-            self.SetColLabelValue(i, name)
-            self.SetColSize(i, width)
-        self.datas: list[TheAction] = []
-        self.first_add = True
-        self.api = get_api(self)
-        self.SetDefaultCellAlignment(wx.ALIGN_CENTER, wx.ALIGN_CENTER)
-
-        self.SetRowLabelSize(1)
-        self.EnableEditing(False)
-        self.SetLabelFont(font)
-        self.SetDefaultCellFont(font)
-
-    def add_action(
-        self,
-        name: str,
-        start_prqs: list[StartPrq],
-        end_prqs: list[EndPrq],
-        actions: list[AnAction],
-    ):
-        if self.first_add:
-            self.AppendRows(1)
-            self.first_add = False
-        row = self.GetNumberRows() - 1
-
-        self.SetCellValue(row, 0, name)
-        self.SetCellValue(row, 1, " ".join([start.name() for start in start_prqs]))
-        self.SetCellValue(row, 2, " ".join([action.name() for action in actions]))
-        self.SetCellValue(row, 3, " ".join([end.name() for end in end_prqs]))
-        the_action = TheAction(name, actions, start_prqs, end_prqs)
-        self.datas.append(the_action)
-        self.api.send_packet(the_action.build_packet())
-
-
-class StartPrqList(AddableList):
-    def __init__(self, parent):
-        super().__init__(parent, "开始条件")
-
-    def on_add(self):
-        ItemChoiceDialog(self, "选择开始条件", [("1", "条件1"), ("2", "条件2")], self.add_callback)
-
-    def add_callback(self, name: str, data: str):
-        self.add_item(name, data)
-
-
-class EndPrqList(AddableList):
-    def __init__(self, parent):
-        super().__init__(parent, "结束条件")
-
-    def on_add(self):
-        ItemChoiceDialog(self, "选择结束条件", [("1", "条件1"), ("2", "条件2")], self.add_callback)
-
-    def add_callback(self, name: str, data: str):
-        self.add_item(name, data)
-
-
-class ActionAddDialog(wx.Frame):
-    def __init__(self, parent):
-        assert isinstance(parent, ActionEditor)
-        super().__init__(get_window_name(parent, "Client"), title="动作编辑器", size=(420, 390))
-        self.action_editor = parent
-        self.SetFont(ft(12))
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.name_inputter = LabelEntry(self, "名称: ")
-        self.prq_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.start_prqs = StartPrqList(self)
-        self.end_prqs = EndPrqList(self)
-        self.actions_chooser = LabelCombobox(self, "动作: ", [("动作1", "114514"), ("动作2", "54188")])
-        self.bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.ok_btn = wx.Button(self, label="确定")
-        self.cancel_btn = wx.Button(self, label="取消")
-
-        for i in range(10):
-            self.start_prqs.listbox.Append(f"Test:{i}")
-        self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
-        self.cancel_btn.Bind(wx.EVT_BUTTON, self.on_cancel)
-        self.name_inputter.label_ctl.SetFont(ft(13))
-        self.actions_chooser.label_ctl.SetFont(ft(13))
-
-        self.sizer.Add(self.name_inputter, proportion=0)
-        self.sizer.AddSpacer(6)
-        self.prq_sizer.Add(self.start_prqs, flag=wx.EXPAND, proportion=50)
-        self.prq_sizer.AddSpacer(6)
-        self.prq_sizer.Add(self.end_prqs, flag=wx.EXPAND, proportion=50)
-        self.sizer.Add(self.prq_sizer, wx.EXPAND)
-        self.sizer.AddSpacer(6)
-        self.sizer.Add(self.actions_chooser, proportion=0)
-        self.bottom_sizer.Add(self.ok_btn, proportion=0)
-        self.bottom_sizer.AddSpacer(6)
-        self.bottom_sizer.Add(self.cancel_btn, proportion=0)
-        self.sizer.Add(self.bottom_sizer, flag=wx.ALIGN_RIGHT | wx.ALL, border=6)
-        self.SetSizer(self.sizer)
-        self.SetIcon(wx.Icon(abspath(r"assets\action_editor.ico")))
-        self.Show()
-
-    def on_ok(self, _):
-        name = self.name_inputter.text.GetValue()
-        start_prqs = self.start_prqs.get_items()
-        end_prqs = self.end_prqs.get_items()
-        if start_prqs == []:
-            start_prqs.append(NoneStartPrq())
-        if end_prqs == []:
-            end_prqs.append(NoneEndPrq())
-        action = BlueScreenAction()
-        actions = [action]
-        self.action_editor.add_action(name, start_prqs, end_prqs, actions)
-        self.Close()
-
-    def on_cancel(self, _):
-        self.Close()
-
-
-class ActionEditor(Panel):
-    def __init__(self, parent: wx.Window):
-        super().__init__(parent, size=MAX_SIZE)
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.grid = ActionGrid(self)
-
-        self.bar_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.add_btn = wx.Button(self, label="添加操作")
-        self.remove_btn = wx.Button(self, label="删除操作")
-        self.add_btn.Bind(wx.EVT_BUTTON, self.on_add_action)
-        self.grid.SetWindowStyle(wx.SIMPLE_BORDER)
-        self.bar_sizer.Add(self.add_btn)
-        self.bar_sizer.AddSpacer(6)
-        self.bar_sizer.Add(self.remove_btn)
-
-        self.sizer.Add(
-            self.bar_sizer,
-            flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT,
-            border=6,
-        )
-        self.sizer.Add(self.grid, flag=wx.EXPAND | wx.ALL, border=6)
-        self.SetSizer(self.sizer)
-
-    def on_add_action(self, _):
-        ActionAddDialog(self)
-
-    def add_action(self, name: str, start_prqs: list, end_prqs: list, actions: list[AnAction]):
-        self.grid.add_action(name, start_prqs, end_prqs, actions)
-
-
-class ActionList(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(250, 703))
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.top_sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.text = wx.StaticText(self, label="操作列表", style=wx.ALIGN_LEFT)
-        bmp = wx.Bitmap()
-        bmp.LoadFile(abspath(r"assets\add.png"), wx.BITMAP_TYPE_PNG)
-        self.add_btn = wx.BitmapButton(self, bitmap=bmp)
-        self.listbox = wx.ListBox(self, style=wx.LB_SINGLE)
-        self.text.SetFont(ft(13))
-
-        self.top_sizer.Add(self.text, flag=wx.EXPAND | wx.TOP | wx.LEFT, proportion=1, border=4)
-        self.top_sizer.Add(self.add_btn, flag=wx.TOP | wx.RIGHT, proportion=0, border=4)
-        self.sizer.Add(
-            self.top_sizer,
-            flag=wx.ALIGN_TOP | wx.EXPAND | wx.LEFT | wx.RIGHT,
-            proportion=0,
-            border=3,
-        )
-        self.sizer.Add(
-            self.listbox,
-            flag=wx.ALIGN_TOP | wx.EXPAND | wx.ALL,
-            proportion=1,
-            border=5,
-        )
-        self.SetSizer(self.sizer)
-        self.SetWindowStyle(wx.SIMPLE_BORDER)
-
-        for action in Actions.action_list:
-            self.listbox.Append(action.label)
-
-
-class ActionTab(Panel):
-    def __init__(self, parent):
-        super().__init__(parent=parent, size=(1210, 668))
-        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.editor = ActionEditor(self)
-        self.action_list = ActionList(self)
-        self.sizer.Add(self.editor, flag=wx.EXPAND, proportion=1)
-        self.sizer.Add(self.action_list, flag=wx.EXPAND | wx.ALL, proportion=0, border=5)
-        self.SetSizer(self.sizer)
-
-
 class Client(wx.Frame):
     def __init__(
         self,
@@ -1320,6 +278,7 @@ class Client(wx.Frame):
         self.init_ui()
         self.recv_thread = start_and_return(self.packet_recv_thread, name="RecvThread")
         self.send_thread = start_and_return(self.packet_send_thread, name="SendThread")
+        start_and_return(self.state_init, name="StateInit")
         self.Show()
         self.SetPosition(wx.Point(15, 110))
 
@@ -1332,12 +291,14 @@ class Client(wx.Frame):
         self.terminal_panel = TerminalTab(self.tab)
         self.network_panel = NetworkTab(self.tab)
         self.action_panel = ActionTab(self.tab)
+        self.setting_panel = SettingTab(self.tab)
 
         self.tab.AddPage(self.screen_tab, "屏幕")
         self.tab.AddPage(self.files_panel, "文件")
         self.tab.AddPage(self.terminal_panel, "终端")
         self.tab.AddPage(self.network_panel, "网络")
         self.tab.AddPage(self.action_panel, "操作")
+        self.tab.AddPage(self.setting_panel, "配置")
 
         self.SetIcon(GetSystemIcon(15))
         self.Bind(wx.EVT_CLOSE, self.on_close)
@@ -1358,13 +319,19 @@ class Client(wx.Frame):
         start_and_return(self.state_init, name="StateInit")
 
     def state_init(self):
-        packet = {
-            "type": STATE_INFO,
-            "video_mode": self.sending_screen,
-            "monitor_fps": self.screen_tab.screen_panel.controller.screen_fps_setter.input_slider.get_value(),
-            "monitor_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
-        }
-        self.send_packet(packet)
+        packets = [
+            {
+                "type": STATE_INFO,
+                "video_mode": self.sending_screen,
+                "monitor_fps": self.screen_tab.screen_panel.controller.screen_fps_setter.input_slider.get_value(),
+                "video_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
+            },
+            {
+                "type": REQ_CONFIG,
+            },
+        ]
+        for packet in packets:
+            self.send_packet(packet)
 
     def packet_recv_thread(self) -> None:
         while self.connected:
@@ -1426,6 +393,8 @@ class Client(wx.Frame):
                 self.screen_tab.screen_panel.controller.info_shower.update_delay,
                 perf_counter() - packet["timer"],
             )
+        elif packet["type"] == CONFIG_RESULT:
+            wx.CallAfter(self.setting_panel.client_config.parse_result, packet)
 
         return True
 
@@ -1525,7 +494,7 @@ class Client(wx.Frame):
     ) -> None:
         if packet["type"] != PING:
             print(f"发送数据包: {packet_str(packet)}")
-        self.packet_manager.send_packet(packet, loss_enable, priority)
+        return self.packet_manager.send_packet(packet, loss_enable, priority)
 
     def recv_packet(self) -> tuple[int, None] | tuple[int, Packet]:
         return self.packet_manager.recv_packet()

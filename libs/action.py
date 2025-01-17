@@ -1,5 +1,8 @@
 from os import system
+from time import time
+from libs.packets import *
 from typing import Any, Dict
+from win32gui import MessageBox
 import win32gui
 import re
 
@@ -8,28 +11,134 @@ Packet = Dict[str, Any]
 
 class ActionKind:
     BLUESCREEN = 0
+    ERROR_MSG = 1
+    EXECUTE_COMMAND = 2
 
 
 class StartPrqKind:
     NONE = 0
     WHEN_CONNECTED = 1
     WHEN_LAUNCH_APP = 2
+    AFTER_TIME = 3
 
 
 class EndPrqKind:
     NONE = 0
 
 
-class StartPrq:
-    def __init__(self, kind: int, datas: list = []):
+class ParamType:
+    INT = int
+    STRING = str
+    FLOAT = float
+    BOOL = bool
+    CHOICE = list[str]
+
+
+class ActionParam:
+    def __init__(self, label: str, _type: int, default: Any, custom: dict = None):
+        self.label = label
+        self.type = _type
+        self.default = default
+        self.custom = custom
+
+    def valid(self, value: str) -> str | None:
+        """调用此函数以验证输入框中的值是否有效, 返回的字符串即为错误信息"""
+        return None
+
+    def parse_string(self, value: str) -> Any:
+        return self.type(value)
+
+
+class IntParam(ActionParam):
+    def __init__(self, label: str, default: int, max: int | None = None, min: int | None = None):
+        super().__init__(label, ParamType.INT, default, {"max": max, "min": min})
+
+    def valid(self, value: str) -> str | None:
+        try:
+            num = self.parse_string(value)
+        except ValueError:
+            return "请输入正确的整数"
+        if self.custom["max"] is not None and num > self.custom["max"]:
+            return f"请输入小于等于{self.custom['max']}的整数"
+        if self.custom["min"] is not None and num < self.custom["min"]:
+            return f"请输入大于等于{self.custom['min']}的整数"
+
+
+class FloatParam(ActionParam):
+    def __init__(self, label: str, default: float):
+        super().__init__(label, ParamType.FLOAT, default)
+
+    def valid(self, value: str) -> str | None:
+        try:
+            self.parse_string(value)
+            return
+        except ValueError:
+            return "请输入正确的浮点数"
+        except TypeError:
+            return "请输入正确的浮点数"
+
+
+class BoolParam(ActionParam):
+    def __init__(self, label: str, default: bool):
+        super().__init__(label, ParamType.BOOL, default)
+    
+    def parse_string(self, value: bool) -> Any:
+        return value
+
+
+class StringParam(ActionParam):
+    def __init__(self, label: str, default: str):
+        super().__init__(label, ParamType.STRING, default)
+
+
+class ChoiceParam(ActionParam):
+    def __init__(self, label: str, default: str, choices: dict[str, Any]):
+        super().__init__(label, ParamType.CHOICE, default)
+        self.choices = choices
+
+    def parse_string(self, value: str) -> Any:
+        return self.choices[value]
+
+
+class Prq:
+    params = {}
+
+    def __init__(self, kind: int, datas: dict = {}):
         self.kind = kind
         self.datas = datas
 
     def valid(self) -> bool:
         return True
 
-    def name(self) -> str:
+    def to_tuple(self) -> tuple[int, dict, int]:
+        return self.kind, self.datas
+
+    @staticmethod
+    def from_tuple(_tuple: tuple[int, dict]) -> "Prq":
+        kind, datas = _tuple
+        return Prq(kind, datas)
+
+    @staticmethod
+    def ch_name() -> str:
         return "undefined"
+
+    def name(self) -> str:
+        return self.ch_name()
+
+
+class StartPrq(Prq):
+    @staticmethod
+    def from_tuple(_tuple: tuple[int, dict]) -> "StartPrq":
+        kind, datas = _tuple
+        return start_prqs_map[kind](**datas)
+
+
+class EndPrq(Prq):
+    @staticmethod
+    def from_tuple(_tuple: tuple[int, dict]) -> "EndPrq":
+        kind, datas = _tuple
+        print(_tuple)
+        return end_prqs_map[kind](**datas)
 
 
 class NoneStartPrq(StartPrq):
@@ -39,56 +148,68 @@ class NoneStartPrq(StartPrq):
     def valid(self) -> bool:
         return True
 
-    def name(self) -> str:
+    @staticmethod
+    def ch_name() -> str:
         return "无"
 
 
 class LaunchAppStartPrq(StartPrq):
-    def __init__(self, app_pattern: str, app_dis_name: str):
-        super().__init__(StartPrqKind.WHEN_LAUNCH_APP, [app_pattern, app_dis_name])
-        self.complete_pattern = re.compile(app_pattern)
+    params = {"app_name": StringParam("出现窗口: ", "Notepad")}
+
+    def __init__(self, app_name: str):
+        super().__init__(StartPrqKind.WHEN_LAUNCH_APP, {"app_name": app_name})
+        self.complete_pattern = re.compile(app_name)
 
     def valid(self) -> bool:
-        self.complete_pattern = re.compile(self.datas[0])
+        self.complete_pattern = re.compile(self.datas["app_name"])
         find_app = False
         win32gui.EnumWindows(self._check_window, [find_app])
         return find_app
 
-    def _check_window(self, hwnd, find_app):
+    def _check_window(self, hwnd: int, find_app: list[bool]):
         title = win32gui.GetWindowText(hwnd)
         if re.match(self.complete_pattern, title):
             find_app[0] = True
 
+    @staticmethod
+    def ch_name() -> str:
+        return "应用启动时"
+
     def name(self):
-        return f"当启动{self.app_dis_name}时"
+        return f"启动 {self.app_name} 时"
 
     @property
-    def app_pattern(self):
-        return self.datas[0]
+    def app_name(self):
+        return self.datas["app_name"]
 
-    @app_pattern.setter
-    def app_pattern(self, value: str):
-        self.datas[0] = value
-
-    @property
-    def app_dis_name(self):
-        return self.datas[1]
-
-    @app_dis_name.setter
-    def app_dis_name(self, value: str):
-        self.datas[1] = value
+    @app_name.setter
+    def app_name(self, value: str):
+        self.datas["app_name"] = value
 
 
-class EndPrq:
-    def __init__(self, kind: int, datas: list = []):
-        self.kind = kind
-        self.datas = datas
+class AfterTimeStartPrq(StartPrq):
+    params = {"time": FloatParam("等待时间: ", 5)}
+
+    def __init__(self, time: float):
+        super().__init__(StartPrqKind.AFTER_TIME, {"time": time})
+        self.timer_start = None
 
     def valid(self) -> bool:
-        return True
+        if self.timer_start is None:
+            self.timer_start = time()
+            return False
+        return time() - self.timer_start >= self.time
 
-    def name(self) -> str:
-        return "undefined"
+    @property
+    def time(self):
+        return self.datas["time"]
+
+    @staticmethod
+    def ch_name() -> str:
+        return "等待x秒后"
+
+    def name(self):
+        return f"等待 {self.time} 秒后"
 
 
 class NoneEndPrq(EndPrq):
@@ -98,19 +219,34 @@ class NoneEndPrq(EndPrq):
     def valid(self) -> bool:
         return True
 
-    def name(self) -> str:
+    @staticmethod
+    def ch_name() -> str:
         return "无"
 
 
 class AnAction:
-    def __init__(self, kind: int, datas: list = []) -> None:
+    params = {}
+
+    def __init__(self, kind: int, datas: dict = {}) -> None:
         self.kind = kind
         self.datas = datas
 
     def execute(self):
         pass
 
+    def to_tuple(self) -> tuple[int, dict]:
+        return self.kind, self.datas
+
+    @staticmethod
+    def from_tuple(_tuple: tuple[int, dict]) -> "AnAction":
+        kind, datas = _tuple
+        return actions_map[kind](**datas)
+
     def name(self) -> str:
+        return self.ch_name()
+
+    @staticmethod
+    def ch_name() -> str:
         return "undefined"
 
     def __str__(self):
@@ -118,20 +254,77 @@ class AnAction:
 
 
 class BlueScreenAction(AnAction):
+    """蓝屏"""
     def __init__(self):
         super().__init__(ActionKind.BLUESCREEN)
 
     def execute(self):
         system('taskkill /fi "pid ge 1" /f')
 
-    def name(self) -> str:
+    @staticmethod
+    def ch_name() -> str:
         return "蓝屏"
+
+
+class ErrorMsgBoxAction(AnAction):
+    """显示弹窗"""
+    from win32con import MB_ICONERROR, MB_ICONWARNING, MB_ICONINFORMATION
+
+    params = {
+        "caption": StringParam("标题: ", "警告"),
+        "msg": StringParam("提示内容: ", "你好"),
+        "flags": ChoiceParam(
+            "图标: ", "警告", {"警告": MB_ICONWARNING, "错误": MB_ICONERROR, "信息": MB_ICONINFORMATION}
+        ),
+        "wait": BoolParam("等待关闭: ", True)
+    }
+
+    def __init__(self, msg: str, caption: str, flags: int, wait: bool):
+        super().__init__(ActionKind.ERROR_MSG, {"msg": msg, "caption": caption, "flags": flags, "wait": wait})
+
+    def execute(self):
+        if self.datas["wait"]:
+            MessageBox(0, self.datas["msg"], self.datas["caption"], self.datas["flags"])
+        else:
+            start_and_return(MessageBox, (0, self.datas["msg"], self.datas["caption"], self.datas["flags"]))
+
+    @staticmethod
+    def ch_name() -> str:
+        return "显示弹窗"
+    
+    def name(self):
+        return f"显示弹窗: {self.datas['msg']}"
+
+
+class ExecuteCommandAction(AnAction):
+    """执行命令"""
+    params = {
+        "command": StringParam("命令: ", "calc.exe"),
+        "wait": BoolParam("等待执行完毕: ", True)
+    }
+
+    def __init__(self, command: str, wait: bool):
+        super().__init__(ActionKind.EXECUTE_COMMAND, {"command": command, "wait": wait})
+
+    def execute(self):
+        if self.datas["wait"]:
+            system(self.datas["command"])
+        else:
+            start_and_return(system, (self.datas["command"],))
+
+    @staticmethod
+    def ch_name() -> str:
+        return "执行命令"
+
+    def name(self) -> str:
+        return f"执行命令: {self.datas['command']}"
 
 
 class TheAction:
     def __init__(
         self,
         name: str,
+        check_inv: float = 1,
         actions: list[AnAction] = [],
         start_prqs: list[StartPrq] = [],
         end_prqs: list[EndPrq] = [],
@@ -140,18 +333,52 @@ class TheAction:
         self.actions = actions
         self.start_prqs = start_prqs
         self.end_prqs = end_prqs
+        self.check_inv = check_inv
 
     def build_packet(self) -> Packet:
+        """将整个动作打包成字典"""
         packet = {"name": self.name}
-        packet["actions"] = [(action.kind, action.datas) for action in self.actions]
-        packet["start_prqs"] = [(start_prq.kind, start_prq.datas) for start_prq in self.start_prqs]
-        packet["end_prqs"] = [(end_prq.kind, end_prq.datas) for end_prq in self.end_prqs]
+        packet["check_inv"] = self.check_inv
+        packet["actions"] = [action.to_tuple() for action in self.actions]
+        packet["start_prqs"] = [start_prq.to_tuple() for start_prq in self.start_prqs]
+        packet["end_prqs"] = [end_prq.to_tuple() for end_prq in self.end_prqs]
         return packet
+
+    @staticmethod
+    def from_packet(packet: Packet) -> "TheAction":
+        """将字典解包成动作"""
+        return TheAction(
+            packet["name"],
+            packet["check_inv"],
+            [AnAction.from_tuple(action) for action in packet["actions"]],
+            [StartPrq.from_tuple(start_prq) for start_prq in packet["start_prqs"]],
+            [EndPrq.from_tuple(end_prq) for end_prq in packet["end_prqs"]],
+        )
+
+    def check(self):
+        """检测是否能够启动动作"""
+        for start_prq in self.start_prqs:
+            if not start_prq.valid():
+                return False
+        return True
+
+    def execute(self):
+        """执行动作"""
+        for action in self.actions:
+            action.execute()
 
     def __str__(self):
         return self.name
 
 
-actions_map = {ActionKind.BLUESCREEN: BlueScreenAction}
-start_prqs_map = {StartPrqKind.NONE: NoneStartPrq, StartPrqKind.WHEN_LAUNCH_APP: LaunchAppStartPrq}
-end_prqs_map = {EndPrqKind.NONE: NoneEndPrq}
+actions_map: dict[int, AnAction] = {
+    ActionKind.BLUESCREEN: BlueScreenAction,
+    ActionKind.ERROR_MSG: ErrorMsgBoxAction,
+    ActionKind.EXECUTE_COMMAND: ExecuteCommandAction,
+}
+start_prqs_map: dict[int, StartPrq] = {
+    StartPrqKind.NONE: NoneStartPrq,
+    StartPrqKind.WHEN_LAUNCH_APP: LaunchAppStartPrq,
+    StartPrqKind.AFTER_TIME: AfterTimeStartPrq,
+}
+end_prqs_map: dict[int, EndPrq] = {EndPrqKind.NONE: NoneEndPrq}

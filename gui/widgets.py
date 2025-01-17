@@ -1,11 +1,11 @@
-from os.path import abspath
-from threading import Lock
-from time import sleep
-from typing import Callable
-from win32api import GetSystemMetrics
-from win32gui import GetCursorPos
-from libs.packets import *
 import wx
+from time import sleep
+from libs.packets import *
+from threading import Lock
+from os.path import abspath
+from typing import Callable
+from win32gui import GetCursorPos
+from win32api import GetSystemMetrics
 
 font: wx.Font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
 font.SetPointSize(11)
@@ -32,6 +32,15 @@ def get_window(widget: wx.Window) -> wx.Frame:
         widget: wx.Window = widget.GetParent()
         if isinstance(widget, wx.Frame):
             return widget
+
+
+def format_size(size_in_bytes: float, retaining: int = 2) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    index = 0
+    while size_in_bytes >= 1024 and index < len(units) - 1:
+        size_in_bytes /= 1024
+        index += 1
+    return f"{round(size_in_bytes, retaining)} {units[index]}"
 
 
 class Panel(wx.Panel):
@@ -62,22 +71,32 @@ class LabelEntry(Panel):
 
 
 class LabelCombobox(Panel):
-    def __init__(self, parent, label: str, choices: list[tuple[str, str]] = []):
+    def __init__(self, parent, label: str, choices: list[tuple[str, Any]] = []):
         super().__init__(parent, size=(130, 27))
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.label_ctl = wx.StaticText(self, label=label)
         self.combobox = wx.ComboBox(
-            self, choices=[name for name, _ in choices], size=(100, 27)
+            self, choices=[name for name, _ in choices], size=(100, 27), style=wx.CB_READONLY
         )
         self.label_ctl.SetFont(font)
         sizer.Add(self.label_ctl, flag=wx.ALIGN_CENTER_VERTICAL, proportion=0)
         sizer.AddSpacer(6)
         sizer.Add(self.combobox, wx.EXPAND)
         self.SetSizer(sizer)
+        self.combobox.Clear()  # 奇怪的Bug: 如果不清空就会导致选项不断叠加
 
         self.datas = choices
 
-    def get_data(self) -> str | None:
+    def set_choices(self, choices: list[tuple[str, Any]]):
+        self.combobox.Clear()
+        self.combobox.AppendItems([name for name, _ in choices])
+        self.datas = choices
+
+    def add_choice(self, name: str, data: Any):
+        self.combobox.Append(name)
+        self.datas.append((name, data))
+
+    def get_data(self) -> Any | None:
         select = self.combobox.GetValue()
         for name, data in self.datas:
             if name == select:
@@ -86,7 +105,9 @@ class LabelCombobox(Panel):
 
 
 class AddableList(Panel):
-    def __init__(self, parent, label: str):
+    def __init__(
+        self, parent, label: str, ready_data: list[tuple[str, Any]] = [], ch_title: str = "选择"
+    ):
         super().__init__(parent, size=(200, 200))
         sizer = wx.BoxSizer(wx.VERTICAL)
         top_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -101,41 +122,42 @@ class AddableList(Panel):
 
         top_sizer.Add(self.label_ctl, wx.EXPAND | wx.TOP, border=5)
         top_sizer.Add(self.add_button, proportion=0)
-        sizer.Add(top_sizer, flag=wx.ALL | wx.EXPAND, border=3)
-        sizer.Add(self.listbox, wx.EXPAND)
+        sizer.Add(top_sizer, flag=wx.ALL | wx.EXPAND, border=3, proportion=0)
+        sizer.Add(self.listbox, flag=wx.EXPAND, proportion=1)
         self.SetSizer(sizer)
-        self.listbox.Bind(wx.EVT_MENU, self.on_empty_menu)
+        self.listbox.Bind(wx.EVT_RIGHT_DOWN, self.on_empty_menu)
         self.listbox.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_item_menu)
 
-        self.datas: dict[int, tuple[str, str]] = {}
+        self.ch_title = ch_title
+        self.ready_data = ready_data
+        self.datas: dict[int, tuple[str, Any]] = {}
 
-    def add_item(self, name: str, data: str, index: int = -1):
+    def add_item(self, name: str, data: Any, index: int = -1):
         if index == -1:
             index = self.listbox.GetCount()
         self.listbox.Insert(name, index)
         self.datas[index] = (name, data)
 
-    def on_add(self):
-        pass
-
-    def on_empty_menu(self, event):
+    def on_empty_menu(self, event: wx.MouseEvent):
         menu = wx.Menu()
-        menu.Append(wx.MenuItem(menu, 1, "添加"))
-        menu.Bind(wx.EVT_MENU, self.on_add, id=1)
+        menu.Append(1, "添加")
+        menu.Bind(wx.EVT_MENU, lambda _: self.on_add(), id=1)
         self.PopupMenu(menu)
+        event.Skip()
 
     def on_item_menu(self, event: wx.ListEvent):
         menu = wx.Menu()
-        menu.Append(wx.MenuItem(menu, 1, "添加"))
-        menu.Append(wx.MenuItem(menu, 2, "修改"))
-        menu.Append(wx.MenuItem(menu, 3, "删除"))
+        menu.Append(1, "添加")
+        menu.Append(2, "修改")
+        menu.Append(3, "删除")
         index = event.GetIndex()
         menu.Bind(wx.EVT_MENU, lambda _: self.on_add(), id=1)
         menu.Bind(wx.EVT_MENU, lambda _: self.on_modify(index), id=2)
         menu.Bind(wx.EVT_MENU, lambda _: self.on_delete(index), id=3)
+        self.PopupMenu(menu)
 
     def on_add(self):
-        pass
+        ItemChoiceDialog(self, self.ch_title, self.ready_data, self.add_item)
 
     def on_modify(self, index: int):
         pass
@@ -143,8 +165,8 @@ class AddableList(Panel):
     def on_delete(self, index: int):
         self.listbox.Delete(index)
 
-    def get_items(self) -> list[tuple[str, str]]:
-        return list(self.datas.keys())
+    def get_items(self) -> list[Any]:
+        return [data for _, data in self.datas.values()]
 
 
 class ItemChoiceDialog(wx.Dialog):
@@ -152,8 +174,8 @@ class ItemChoiceDialog(wx.Dialog):
         self,
         parent,
         title: str,
-        choices: list[tuple[str, str]],
-        callback: Callable[[str], None],
+        choices: list[tuple[str, Any]],
+        callback: Callable[[str, Any], None],
     ):
         super().__init__(get_window(parent), title=title, size=(200, 250))
         self.sizer = wx.BoxSizer(wx.VERTICAL)
@@ -164,6 +186,7 @@ class ItemChoiceDialog(wx.Dialog):
         self.cancel_btn = wx.Button(self, label="取消")
 
         self.ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
+        self.listbox.Bind(wx.EVT_LISTBOX_DCLICK, self.on_ok)
         self.cancel_btn.Bind(wx.EVT_BUTTON, lambda _: self.Close())
         self.listbox.SetFont(ft(12))
         self.ok_btn.SetFont(ft(12))
@@ -174,9 +197,7 @@ class ItemChoiceDialog(wx.Dialog):
         self.bottom_sizer.Add(self.ok_btn, proportion=0)
         self.bottom_sizer.AddSpacer(6)
         self.bottom_sizer.Add(self.cancel_btn, proportion=0)
-        self.sizer.Add(
-            self.bottom_sizer, flag=wx.EXPAND | wx.ALL, proportion=0, border=6
-        )
+        self.sizer.Add(self.bottom_sizer, flag=wx.EXPAND | wx.ALL, proportion=0, border=6)
         self.SetSizer(self.sizer)
         self.SetIcon(wx.Icon(abspath("assets/select.ico"), wx.BITMAP_TYPE_ICO))
         for name, _ in choices:
@@ -206,18 +227,12 @@ class InputSlider(wx.Panel):
     ):
         super().__init__(parent=parent, size=(1500, 31))
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.slider = wx.Slider(
-            self, value=value, minValue=_from, maxValue=to, size=(790, 31)
-        )
+        self.slider = wx.Slider(self, value=value, minValue=_from, maxValue=to, size=(790, 31))
         self.inputter = wx.TextCtrl(self, value=str(value), size=(60, 31))
         self.sizer.AddSpacer(5)
-        self.sizer.Add(
-            self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1
-        )
+        self.sizer.Add(self.slider, flag=wx.ALIGN_LEFT | wx.EXPAND | wx.TOP, border=4, proportion=1)
         self.sizer.AddSpacer(5)
-        self.sizer.Add(
-            self.inputter, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0
-        )
+        self.sizer.Add(self.inputter, flag=wx.ALIGN_LEFT | wx.TOP, border=3, proportion=0)
 
         self.slider.Bind(wx.EVT_SLIDER, self.on_slider)
         self.inputter.Bind(wx.EVT_TEXT, self.on_edit)
@@ -262,10 +277,7 @@ class InputSlider(wx.Panel):
 
     def on_enter(self, event: wx.KeyEvent):
         self.SetFocus()
-        if (
-            event.GetKeyCode() == wx.WXK_RETURN
-            or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER
-        ):
+        if event.GetKeyCode() == wx.WXK_RETURN or event.GetKeyCode() == wx.WXK_NUMPAD_ENTER:
             self.on_focus_out()
         event.Skip()
 
