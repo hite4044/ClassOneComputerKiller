@@ -16,6 +16,7 @@ from gui.files import FilesTab, FileViewer
 from gui.terminal import TerminalTab
 from gui.network import NetworkTab
 from gui.action import ActionTab
+from gui.setting import SettingTab
 from libs.api import ClientAPI
 
 SERVER_ADDRESS = ("127.0.0.1", 10616)
@@ -290,12 +291,14 @@ class Client(wx.Frame):
         self.terminal_panel = TerminalTab(self.tab)
         self.network_panel = NetworkTab(self.tab)
         self.action_panel = ActionTab(self.tab)
+        self.setting_panel = SettingTab(self.tab)
 
         self.tab.AddPage(self.screen_tab, "屏幕")
         self.tab.AddPage(self.files_panel, "文件")
         self.tab.AddPage(self.terminal_panel, "终端")
         self.tab.AddPage(self.network_panel, "网络")
         self.tab.AddPage(self.action_panel, "操作")
+        self.tab.AddPage(self.setting_panel, "配置")
 
         self.SetIcon(GetSystemIcon(15))
         self.Bind(wx.EVT_CLOSE, self.on_close)
@@ -316,13 +319,19 @@ class Client(wx.Frame):
         start_and_return(self.state_init, name="StateInit")
 
     def state_init(self):
-        packet = {
-            "type": STATE_INFO,
-            "video_mode": self.sending_screen,
-            "monitor_fps": self.screen_tab.screen_panel.controller.screen_fps_setter.input_slider.get_value(),
-            "video_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
-        }
-        self.send_packet(packet)
+        packets = [
+            {
+                "type": STATE_INFO,
+                "video_mode": self.sending_screen,
+                "monitor_fps": self.screen_tab.screen_panel.controller.screen_fps_setter.input_slider.get_value(),
+                "video_quality": self.screen_tab.screen_panel.controller.screen_quality_setter.input_slider.get_value(),
+            },
+            {
+                "type": REQ_CONFIG,
+            },
+        ]
+        for packet in packets:
+            self.send_packet(packet)
 
     def packet_recv_thread(self) -> None:
         while self.connected:
@@ -384,6 +393,8 @@ class Client(wx.Frame):
                 self.screen_tab.screen_panel.controller.info_shower.update_delay,
                 perf_counter() - packet["timer"],
             )
+        elif packet["type"] == CONFIG_RESULT:
+            wx.CallAfter(self.setting_panel.client_config.parse_result, packet)
 
         return True
 
