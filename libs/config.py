@@ -26,6 +26,7 @@ class Config:
     raw_config = {}
 
     def __init__(self, config_path: str = "config.json"):
+        self.file_block = 1024 * 100  # 100KB的文件块大小
         self.config_path = abspath(config_path)
         self.load_config()
         print(self.raw_config)
