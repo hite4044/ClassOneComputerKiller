@@ -169,9 +169,6 @@ class PacketManager:
         except TimeoutError:
             return 0, None
         return length, unpack(packet)
-
-
-# From Server
 SET_MOUSE_BUTTON = "set_mouse_button"
 SET_MOUSE_SCROLL = "set_mouse_scroll"
 GET_MOUSE_POS = "get_mouse_pos"
@@ -204,8 +201,6 @@ CLIENT_RESTART = "client_restart"
 CHANGE_ADDRESS = "change_address"
 CHANGE_CONFIG = "change_config"
 REQ_CONFIG = "req_config"
-
-# From Client
 LOG = "log"
 SCREEN = "screen"
 KEY_EVENT = "key_event"
@@ -222,3 +217,12 @@ FILE_VIEW_OVER = "file_view_over"
 FILE_VIEW_ERROR = "file_view_error"
 CONFIG_RESULT = "config_result"
 PONG = "pong"
+FILE_DOWNLOAD = "file_download"
+FILE_DOWNLOAD_START = "file_download_start"
+FILE_DOWNLOAD_DATA = "file_download_data"
+FILE_DOWNLOAD_END = "file_download_end"
+FILE_DOWNLOAD_ERROR = "file_download_error"
+FILE_ATTRIBUTES = "file_attributes"
+FILE_ATTRIBUTES_RESULT = "file_attributes_result"
+FILE_ATTRIBUTES_ERROR = "file_attributes_error"
+SYSTEM_INFO = "system_info"

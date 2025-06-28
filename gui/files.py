@@ -1,3 +1,4 @@
+import os
 import wx
 from gui.widgets import *
 from libs.api import get_api
@@ -8,14 +9,26 @@ from win32com.shell import shell, shellcon # type: ignore
 
 
 def extension_to_bitmap(extension) -> wx.Bitmap:
-    """dot is mandatory in extension"""
+    """
+    将文件扩展名转换为位图图标。
 
+    参数:
+        extension (str): 文件扩展名，必须包含点号（例如 '.txt'）。
+
+    返回:
+        wx.Bitmap: 与文件扩展名关联的位图图标。
+    """
+    # 获取文件扩展名对应的图标信息
     flags = shellcon.SHGFI_SMALLICON | shellcon.SHGFI_ICON | shellcon.SHGFI_USEFILEATTRIBUTES
     retval, info = shell.SHGetFileInfo(extension, FILE_ATTRIBUTE_NORMAL, flags)
     assert retval
+    
+    # 提取图标句柄并创建图标对象
     hicon, _, _, _, _ = info
     icon: wx.Icon = wx.Icon()
     icon.SetHandle(hicon)
+    
+    # 创建位图对象并从图标复制图像
     bmp = wx.Bitmap()
     bmp.CopyFromIcon(icon)
     return bmp
@@ -28,6 +41,16 @@ class DataType:
 
 class FilesData:
     def __init__(self, _type: int, name: str, item_id: wx.TreeItemId):
+        # 初始化文件数据对象
+        # 
+        # 参数:
+        # _type: 文件类型标识符
+        # name: 文件名称
+        # item_id: wx.TreeCtrl中的对应项ID
+        # 
+        # 属性:
+        # name_dict: 存储名称到类型、ID和数据的映射
+        # id_dict: 存储TreeItemId到类型、名称和数据的映射
         self.name = name
         self.type = _type
         self.item_id = item_id
@@ -50,12 +73,37 @@ class FilesData:
     def name_tree_get(self, names: list[str]):
         ret = self
         for name in names:
+            if not name:  # 跳过空路径段
+                continue
+            if name not in ret.name_dict:
+                # 如果路径不存在，返回一个空的FilesData对象
+                return FilesData(DataType.FOLDER, "", None)
             ret = ret.name_dict[name][2]
+            if ret is None:  # 处理空节点
+                return FilesData(DataType.FOLDER, "", None)
         return ret
 
     def clear(self):
         self.name_dict.clear()
         self.id_dict.clear()
+
+    def clear_files(self):
+        """仅清除文件项，保留目录项"""
+        keys_to_remove = []
+        for name, (_, _, data) in self.name_dict.items():
+            if data and data.type == DataType.FILE:
+                keys_to_remove.append(name)
+        
+        for key in keys_to_remove:
+            del self.name_dict[key]
+
+        ids_to_remove = []
+        for item_id, (_, _, data) in self.id_dict.items():
+            if data and data.type == DataType.FILE:
+                ids_to_remove.append(item_id)
+        
+        for item_id in ids_to_remove:
+            del self.id_dict[item_id]
 
 
 class FilesTreeView(wx.TreeCtrl):
@@ -78,46 +126,125 @@ class FilesTreeView(wx.TreeCtrl):
 
         root = self.AddRoot("命根子")
         self.files_data: FilesData = FilesData(DataType.FOLDER, "root", root)
-        c_disk = self.AppendItem(root, "C:", image=self.folder_icon)
-        d_disk = self.AppendItem(root, "D:", image=self.folder_icon)
-        self.AppendItem(c_disk, "加载中...")
-        self.AppendItem(d_disk, "加载中...")
-        self.files_data.add(DataType.FOLDER, "C:", c_disk)
-        self.files_data.add(DataType.FOLDER, "D:", d_disk)
+
+        self.AppendItem(root, "加载中...")
 
         self.Bind(wx.EVT_TREE_ITEM_MENU, self.on_menu)
 
+    def load_drive_list(self, drives: list[str]):
+        """动态加载盘符列表"""
+        root = self.GetRootItem()
+        
+        # 清除根节点下所有子项
+        self.DeleteChildren(root)
+        self.files_data.clear()
+        
+        # 添加实际盘符
+        for drive in drives:
+            drive_node = self.AppendItem(root, drive, image=self.folder_icon)
+            self.AppendItem(drive_node, "加载中...")
+            self.files_data.add(DataType.FOLDER, drive, drive_node)
+        
+        # 展开根节点
+        self.Expand(root)
+
     def load_packet(self, packet: Packet):
+        if packet.get("type") == "drive_list":  # 处理盘符列表
+            self.load_drive_list(packet["drives"])
+            return
         root_path = packet["path"]
         dirs = packet["dirs"]
         files = packet["files"]
 
-        paths: list = normpath(root_path).split("\\")
-        paths.pop(-1) if paths[-1] == "" else None
-        correct_dir = self.files_data.name_tree_get(paths)
-        root_id = correct_dir.item_id
+        # 统一处理路径格式
+        root_path = root_path.replace("\\", "/").replace("//", "/")
+        # 提取盘符作为根节点
+        drive, path_part = self.parse_drive_and_path(root_path)
+        
+        # 获取盘符节点
+        drive_node = self.files_data.name_dict.get(drive)
+        if not drive_node:
+            return
+        
+        # 拆分路径部分
+        paths = path_part.split("/") if path_part else []
+        paths = [p for p in paths if p]  # 移除空路径段
+        
+        # 从盘符节点开始查找
+        current_node = drive_node[2]  # FilesData对象
+        for name in paths:
+            if name not in current_node.name_dict:
+                # 路径不存在，创建中间节点
+                parent_id = current_node.item_id
+                new_item = self.AppendItem(parent_id, name, image=self.folder_icon)
+                self.AppendItem(new_item, "加载中...")
+                current_node.add(DataType.FOLDER, name, new_item)
+            current_node = current_node.name_dict[name][2]
+        
+        # 现在current_node是目标节点
+        root_id = current_node.item_id
+        
+        # 清除现有文件项（保留目录项）
+        current_node.clear_files()
+        
+        # 删除现有文件子项
+        children = []
+        cookie = wx.TreeItemId()
+        child, cookie = self.GetFirstChild(root_id)
+        while child.IsOk():
+            children.append(child)
+            child, cookie = self.GetNextChild(root_id, cookie)
 
-        correct_dir.clear()
-        self.DeleteChildren(root_id)
-
+        for child in children:
+            if not self.ItemHasChildren(child):  # 只删除文件项
+                self.Delete(child)
+        
+        # 添加新目录
         for dir_name in dirs:
             item_id = self.AppendItem(root_id, dir_name, image=self.folder_icon)
             self.AppendItem(item_id, "加载中...")
-            correct_dir.add(DataType.FOLDER, dir_name, item_id)
+            current_node.add(DataType.FOLDER, dir_name, item_id)
+        
+        # 添加新文件
         for file_name in files:
             assert isinstance(file_name, str)
+            icon = self.default_icon
             if "." in file_name:
                 extension = file_name.split(".")[-1]
                 if extension not in self.icons:
                     self.icons[extension] = self.image_list.Add(extension_to_bitmap("." + extension))
                 icon = self.icons[extension]
-            else:
-                icon = self.default_icon
             item_id = self.AppendItem(root_id, file_name, image=icon)
-            correct_dir.add(DataType.FILE, file_name, item_id)
-        if len(dirs + files) != 0:
+            current_node.add(DataType.FILE, file_name, item_id)
+        
+        if len(dirs + files) != 0 and root_id != self.GetRootItem():
             self.load_over_flag = True
             self.Expand(root_id)
+
+    def parse_drive_and_path(self, path: str) -> tuple[str, str]:
+        """提取盘符和剩余路径"""
+        if ":/" in path:
+            drive, path = path.split(":/", 1)
+            return drive + ":", path.lstrip("/")
+        return "", path.lstrip("/")
+
+
+    def name_tree_get(self, names: list[str]):
+        ret = self.files_data
+        for name in names:
+            if not name:  # 跳过空路径段
+                continue
+            if name not in ret.name_dict:
+                # 如果路径不存在，创建一个新的FilesData对象
+                new_item_id = self.AppendItem(ret.item_id, name, image=self.folder_icon)
+                new_data = FilesData(DataType.FOLDER, name, new_item_id)
+                ret.add(DataType.FOLDER, name, new_item_id)
+                ret = new_data
+            else:
+                ret = ret.name_dict[name][2]
+                if ret is None:  # 处理空节点
+                    return FilesData(DataType.FOLDER, "", None)
+        return ret
 
     def on_expend(self, event: wx.TreeEvent):
         if self.load_over_flag:
@@ -130,16 +257,31 @@ class FilesTreeView(wx.TreeCtrl):
             event.Veto()
 
     def get_item_path(self, item: wx.TreeItemId):
-        path = ""
-        while True:
-            if item == self.GetRootItem():
-                break
-            name = str(self.GetItemText(item))
-            if ":" in name:
-                name += "\\"
-            path = path_join(name, path)
-            item = self.GetItemParent(item)
+        path_parts = []
+        current = item
+        
+        # 向上遍历直到根节点
+        while current and current != self.GetRootItem():
+            name = self.GetItemText(current)
+            path_parts.insert(0, name)
+            current = self.GetItemParent(current)
+        
+        # 合并路径部分
+        if not path_parts:
+            return ""
+        
+        # 确保盘符格式正确
+        if len(path_parts) > 0 and path_parts[0].endswith(':'):
+            # 盘符后添加斜杠
+            path = path_parts[0] + "\\" + "\\".join(path_parts[1:])
+        else:
+            path = "\\".join(path_parts)
+        
+        # 替换可能的双斜杠
+        path = path.replace("\\\\", "\\")
         return path
+
+
 
     def request_list_dir(self, item: wx.TreeItemId):
         self._request_list_dir(self.get_item_path(item))
@@ -157,7 +299,6 @@ class FilesTreeView(wx.TreeCtrl):
         paths = path.split("\\")
         paths.pop(-1) if paths[-1] == "" else None
         files_data: FilesData = self.files_data.name_tree_get(paths)
-
         menu = wx.Menu()
         if files_data.type == DataType.FILE:
             menu.Append(1, "查看内容")
@@ -165,17 +306,34 @@ class FilesTreeView(wx.TreeCtrl):
             menu.Append(3, "删除")
             menu.Append(4, "属性")
             menu.Bind(wx.EVT_MENU, lambda _: self.view_file(path), id=1)
+            menu.Bind(wx.EVT_MENU, lambda _: self.download_file(path), id=2)  # 下载功能
             menu.Bind(wx.EVT_MENU, lambda _: self.delete_path(path, item_id), id=3)
+            menu.Bind(wx.EVT_MENU, lambda _: self.get_file_attributes(path), id=4)  # 属性功能
         elif files_data.type == DataType.FOLDER:
             menu.Append(1, "刷新此文件夹")
-            menu.Append(2, "删除")
-            menu.Append(3, "属性")
+            menu.Append(2, "属性")
             menu.Bind(wx.EVT_MENU, lambda _: self.refresh_dir(path, item_id), id=1)
+            menu.Bind(wx.EVT_MENU, lambda _: self.get_file_attributes(path), id=2)  # 属性功能
         self.PopupMenu(menu)
+    
+    def download_file(self, path: str):
+        """请求下载文件"""
+        packet = {"type": FILE_DOWNLOAD, "path": path}
+        self.api.send_packet(packet)
+    
+    def get_file_attributes(self, path: str):
+        """请求文件属性"""
+        packet = {"type": FILE_ATTRIBUTES, "path": path}
+        self.api.send_packet(packet)
 
     def view_file(self, path: str):
+        # 检查路径是否合法
+        if ".." in path or not os.path.isfile(path):
+            wx.MessageBox("无效文件路径", "错误", wx.OK | wx.ICON_ERROR)
+            return
+        
         path = normpath(path)
-        packet = {"type": FILE_VIEW, "path": path, "data_max_size": 1024 * 100}
+        packet = {"type": FILE_VIEW, "path": path, "data_max_size": 1024 * 1024 * 1024}
         self.api.send_packet(packet)
 
     def refresh_dir(self, path: str, item_id: wx.TreeItemId):
